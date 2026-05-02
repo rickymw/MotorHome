@@ -18,6 +18,8 @@ type PersonalBest struct {
 	Car              string       `json:"car"`
 	Track            string       `json:"track"`
 	BrakeEntries     BrakeEntryMap `json:"brakeEntries,omitempty"`   // segment name → brake onset
+	Phases           []PBPhase     `json:"phases,omitempty"`          // phase data from PB lap
+	Setup            string        `json:"setup,omitempty"`           // raw "CarSetup:" YAML block from the PB session
 }
 
 // File is the top-level structure stored in pb.json: a map from Key → PersonalBest.
@@ -86,11 +88,13 @@ func writeFileAtomic(path string, data []byte) error {
 
 // Update checks whether lapTime beats the stored PB for the given car/track.
 // If so (or if no PB exists yet), it updates pbf in-place and returns true.
+// An entry with LapTime == 0 is treated as "no PB yet" — those are created as
+// side effects of BrakeEntrySet and must not block a real PB from being saved.
 // date should be "YYYY-MM-DD"; weather is a human-readable string or "".
 func Update(pbf File, car, track string, lapTime float32, formatted, date, weather string) bool {
 	key := Key(car, track)
 	existing, ok := pbf[key]
-	if ok && existing.LapTime <= lapTime {
+	if ok && existing.LapTime > 0 && existing.LapTime <= lapTime {
 		return false
 	}
 	// Preserve accumulated brake entries when replacing a PB — they are
@@ -109,4 +113,25 @@ func Update(pbf File, car, track string, lapTime float32, formatted, date, weath
 		BrakeEntries:     brakeEntries,
 	}
 	return true
+}
+
+// SetPhases stores phase data for the PB lap. Called after Update returns true
+// and the caller has computed phases for the new PB lap. No-op if no entry exists.
+func SetPhases(pbf File, car, track string, phases []PBPhase) {
+	key := Key(car, track)
+	if pbf[key] == nil {
+		return
+	}
+	pbf[key].Phases = phases
+}
+
+// SetSetup stores the raw "CarSetup:" YAML block from the PB lap's session,
+// so "analyze -lap pb" can reproduce the setup tables without the original .ibt.
+// No-op if no entry exists.
+func SetSetup(pbf File, car, track, setupYAML string) {
+	key := Key(car, track)
+	if pbf[key] == nil {
+		return
+	}
+	pbf[key].Setup = setupYAML
 }

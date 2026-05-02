@@ -1,7 +1,7 @@
 # CLAUDE.md — MotorHome
 
 ## Project overview
-Windows CLI tool (`motorhome.exe`) that launches, monitors, and closes sim racing apps in sequence, analyses iRacing `.ibt` telemetry files, and records voice notes during a session. Designed for Stream Deck integration. Five subcommands: `start`, `stop`, `status`, `analyze`, `notes`. Accepts an optional `-config <path>` flag.
+Windows CLI tool (`motorhome.exe`) that launches, monitors, and closes sim racing apps in sequence, analyses iRacing `.ibt` telemetry files, and records voice notes during a session. Designed for Stream Deck integration. Six subcommands: `start`, `stop`, `status`, `analyze`, `notes`, `live`. Accepts an optional `-config <path>` flag.
 
 ## Documentation rule
 When making any code change, always review and update documentation to match:
@@ -18,6 +18,9 @@ When making any code change, always create or update tests to match:
 - Run `go test ./...` before considering the change complete
 
 Tests must be written in the same pass as the code — never left as a follow-up.
+
+## Commit rule
+After completing a feature, bug fix, or any other coherent code change, commit and push to `origin` without waiting for explicit permission. The repo is single-developer, master-only — every change should land. Stage just the files relevant to the change (do not bundle unrelated work-in-progress) and write a focused conventional-style commit message.
 
 ## Build
 ```powershell
@@ -42,10 +45,15 @@ motorhome analyze                                   # analyze most recently modi
 motorhome analyze 2                                 # analyze 2nd most recent .ibt in ibtDir
 motorhome analyze session.ibt                       # analyze specific file
 motorhome analyze -lap 3 session.ibt                # specific lap
+motorhome analyze -lap pb                           # render stored PB lap from pb.json
 motorhome analyze -update-map session.ibt           # re-detect track segments from this session
 motorhome analyze -geo-method lataccel session.ibt  # use lateral G instead of GPS curvature
 motorhome analyze -dump T3 session.ibt              # dump T3 telemetry to CSV for AI analysis
 motorhome analyze -dump 5 -lap 3 session.ibt        # dump 5th segment from lap 3
+motorhome live                                      # one-shot position + gap to car ahead/behind
+motorhome live -watch                               # stream updates at 5 Hz until Ctrl-C
+motorhome live -watch -hz 10                        # poll at 10 Hz
+motorhome live -raw                                 # dump raw LiveData fields (diagnostic)
 ```
 
 ## AI Coaching workflow
@@ -69,9 +77,9 @@ Each package has its own README with full detail. Below is a terse summary with 
 | `internal/ibt` | Low-level `.ibt` binary parser; `File.Sample(i)` typed accessor | [README](internal/ibt/README.md) |
 | `internal/analysis` | `ExtractLaps`, `ComputePhases`, `ComputeBrakeEntries`, `ComputeTyreSummary`, `DumpSegmentCSV`, `ParseSessionMeta` | [README](internal/analysis/README.md) |
 | `internal/trackmap` | GPS curvature corner detection (`latlon`) with steering/speed/lat-G validation; fallback `lataccel`; `trackmap.json` load/save | [README](internal/trackmap/README.md) |
-| `internal/pb` | Personal best store; `pb.Update` returns true on new PB | [README](internal/pb/README.md) |
+| `internal/pb` | Personal best store; `pb.Update` returns true on new PB; `PBPhase` stores per-segment data for delta comparison | [README](internal/pb/README.md) |
 | `internal/notes` | `Note{Timestamp,Text}`/`Session` types; `AppendNote` load→append→save | [README](internal/notes/README.md) |
-| `internal/iracing` | `ReadLiveData()` snapshot from iRacing shared memory (currently unused) | [README](internal/iracing/README.md) |
+| `internal/iracing` | `ReadLiveData()` snapshot from iRacing shared memory (Windows-only); `ParseDrivers`, `ComputeGaps` for gap-to-car math (cross-platform) | [README](internal/iracing/README.md) |
 | `internal/audio` | WinMM `Recorder.Start/Stop`; `BuildWAV` for Whisper input | [README](internal/audio/README.md) |
 
 ### Config (`launcher.config.json`)
@@ -92,10 +100,12 @@ Key top-level fields:
 4. Load `trackmap.json`; detect from filtered laps if no entry exists (latlon → lataccel fallback)
 5. Compute match score (always lataccel for consistency); compute/blend `brakeEntryPct` on new sessions using filtered laps
 6. Increment `lapsUsed`/`sessionsUsed` once per unique session; save trackmap
-7. Load `pb.json`; update if new PB; save
-8. Print: header (file, driver, car, track) → setup tables (Tyres + Suspension corners parsed from CarSetup YAML) → tyre summary (avg carcass temps, end-of-lap wear, hot pressures, brake bias) → map line → PB line → lap list → phase table
+7. Load `pb.json`; update if new PB; if new PB and segments available, store phase data (`PBPhase`) and the raw `CarSetup:` YAML block (`Setup` field) for the PB lap; save
+8. Print: header (file, driver, car, track) → setup tables (Tyres + Suspension corners parsed from CarSetup YAML) → tyre summary (avg carcass temps, end-of-lap wear, hot pressures, brake bias) → map line → PB line → lap list → phase table → vs PB delta table (if stored PB phases exist)
 
 `-update-map` forces re-detection. `-geo-method latlon|lataccel` selects detection method. `-dump <segment>` writes a downsampled (20Hz) CSV of the segment's telemetry for AI analysis — accepts segment name (T3) or 1-based index (3). Output includes 1s of context before/after.
+
+`-lap` accepts a positive integer (specific lap), empty (best lap of session — default), or `pb` (render the PB stored in `pb.json` without running the full analysis pipeline). For `-lap pb`: when an `.ibt` is available the car/track come from its session YAML; with no `.ibt` (or empty `ibtDir`) the single PB entry is used, or all entries are listed if there are several. The PB record stores `LapTime` / `Date` / `Weather`, the per-segment `Phases`, and the raw `CarSetup:` YAML block — enough to reproduce the setup and phase tables offline, without sample-level telemetry.
 
 ### notes subcommand flow (`cmd/motorhome/notes.go`)
 Toggle model — each press starts or stops recording:
@@ -105,15 +115,22 @@ Toggle model — each press starts or stops recording:
 
 `notes set-hotkey` installs a keyboard hook and Raw Input listener simultaneously; first input wins and is saved to config. HID button-release events are discarded (toggle only cares about press).
 
+### live subcommand flow (`cmd/motorhome/live.go`)
+Reads an iRacing shared-memory snapshot via `iracing.ReadLiveData()` and prints your position, lap, and gap in seconds to the car directly ahead/behind on track. Default mode prints one frame and exits. `-watch` polls at `-hz` Hz (default 5, clamped 1–60) and prints one summary line per tick until Ctrl-C. `-raw` dumps every field of `LiveData` plus per-car detail for each valid CarIdx — use this when the formatted view looks wrong. Gap computation lives in `internal/iracing/gap.go` (`ComputeGaps`); driver-name lookup uses the `Drivers` map parsed from the session YAML. Solo practice sessions with no other cars show `Ahead/Behind: (none)` by design. Windows-only (`//go:build windows`).
+
 ### Phase table columns
 `Name | Phase | Spd (entry→exit km/h) | OnBrk | PkBrk | Thr% | LatG | Wheel° | Corr | ABS | Lock | Spin | Coast`
 — Phase = entry/mid/exit/full. Straights get one "full" phase. Corners are split into entry/mid/exit using 80% of peak |SteeringAngle| as the commitment threshold. Corners with peak steering < 5° get a single "full" phase. Spd = entry and exit speed in km/h. OnBrk = % of phase time with brake applied (>2%). PkBrk = peak brake pressure. Thr% = samples at full throttle > 95%. LatG = mean abs(LatAccel)/9.81. Wheel° = peak absolute steering wheel angle in the phase (degrees; steering wheel, not road wheel — divide by steering ratio for tyre angle). Corr = steering direction reversals above threshold within the phase. ABS = samples with ABS active. Lock = samples where any wheel speed < 95% of vehicle speed under braking. Spin = samples where any wheel speed > 105% of vehicle speed under power. Coast = seconds (CoastSamples / 60).
+
+### vs PB delta table
+`Name | Phase | dSpd | dBrk | dPkBr | dThr | dLatG | dCorr | dABS | dLck | dSpn | dCoast`
+— Shown after the phase table when stored PB phases exist. Each value is `current − PB`. Positive speed = faster than PB. Positive brake/coast/error counts = more than PB (usually worse). Phases are matched by segment name + phase kind; unmatched phases (e.g. track map changed) are skipped. Stored in `pb.json` as `phases` array inside `PersonalBest`.
 
 ### Telemetry channels extracted
 SampleData extracts ~60 channels from .ibt files: core timing/position (LapDistPct, SessionTime, Speed, Lat, Lon), driver inputs processed and raw (Throttle/ThrottleRaw, Brake/BrakeRaw, Clutch, Gear, SteeringAngle), engine (RPM), vehicle dynamics (LongAccel, LatAccel, YawRate), driver aids (ABSActive, ABSCutPct, BrakeBias, TCSetting, ABSSetting), wheel speeds (LF/RF/LR/RR), tyre carcass temps (4×3 CL/CM/CR), tyre wear (4×3 L/M/R), tyre pressures (4), brake line pressures (4), fuel (FuelLevel, FuelUsePerHour), and steering feedback (SteeringWheelTorque). Missing channels default to zero.
 
 ### Lap timing
-`LapLastLapTime` is read from the S/F crossing frame and used as the authoritative lap time (matches iRacing UI and tools like Garage61). Falls back to `SessionTime[last] − SessionTime[first]` if the channel is absent.
+`LapLastLapTime` is the authoritative lap time and matches the iRacing UI / Garage61. iRacing publishes it 0.1–1s *after* the S/F crossing (at the crossing frame itself the channel still holds the previous lap's value), so `ExtractLaps` tracks LLT across samples and applies each new positive value to the most recently finalized lap. The final lap of a recording, invalidated laps (LLT=-1), and recordings with no LLT channel fall back to `SessionTime[last] − SessionTime[first]`.
 
 ### Out/in lap detection
 Out lap: first sample speed < 5 m/s. In lap: last sample speed < 5 m/s. Shown in lap list; excluded from best-lap selection unless forced with `-lap N`.

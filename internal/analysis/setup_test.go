@@ -82,3 +82,48 @@ SessionInfo:
 		t.Error("must not include SessionInfo section")
 	}
 }
+
+func TestExtractCarSetupBlock(t *testing.T) {
+	yaml := "WeekendInfo:\n TrackName: foo\nCarSetup:\n Tires:\n  ColdPressure: 138 kPa\nSessionInfo:\n NumSessions: 1\n"
+	block := ExtractCarSetupBlock(yaml)
+	if block == "" {
+		t.Fatal("expected non-empty block")
+	}
+	// Block must start with the CarSetup header.
+	if block[:len("CarSetup:")] != "CarSetup:" {
+		t.Errorf("block does not start with CarSetup: header — got %q", block[:30])
+	}
+	// Block must NOT contain SessionInfo.
+	for _, line := range []string{"SessionInfo", "NumSessions"} {
+		if contains(block, line) {
+			t.Errorf("block contains %q (next top-level section leaked in)", line)
+		}
+	}
+	// Block must contain at least one Tires line.
+	if !contains(block, "ColdPressure") {
+		t.Error("block missing CarSetup contents")
+	}
+	// Round-trip: parsing the extracted block must produce the same tree as
+	// parsing the full document.
+	full := ParseCarSetupTree(yaml)
+	roundtrip := ParseCarSetupTree(block)
+	if len(full) != len(roundtrip) {
+		t.Errorf("roundtrip node count differs: full=%d, block=%d", len(full), len(roundtrip))
+	}
+}
+
+func TestExtractCarSetupBlock_NotFound(t *testing.T) {
+	if ExtractCarSetupBlock("WeekendInfo:\n TrackName: foo\n") != "" {
+		t.Error("expected empty string when CarSetup section is absent")
+	}
+}
+
+// contains is a tiny helper to keep the test self-contained without importing strings.
+func contains(haystack, needle string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
+}

@@ -9,7 +9,7 @@ A Windows CLI tool that launches sim racing apps in sequence, analyses iRacing `
 - **Idempotent start** — skips apps already running
 - **Status check** — running/stopped state and PID per app
 - **Elevated process support** — kills auto-elevating processes (e.g. SimHub) via `SeDebugPrivilege`
-- **Lap analysis** — phase-based segment stats, PB tracking
+- **Lap analysis** — phase-based segment stats, PB tracking with per-segment delta comparison
 - **GPS-based track segmentation** — auto-detects corners and straights from GPS curvature; cached in `trackmap.json`
 - **Voice notes** — hold a hotkey to record, auto-transcribed via Whisper, stamped with track position and segment
 
@@ -28,7 +28,7 @@ go build -o motorhome.exe ./cmd/motorhome
 ## Subcommands
 
 ```
-motorhome [-config <path>] <start|stop|status|analyze|notes>
+motorhome [-config <path>] <start|stop|status|analyze|notes|live>
 ```
 
 | Subcommand | Description |
@@ -38,6 +38,7 @@ motorhome [-config <path>] <start|stop|status|analyze|notes>
 | `status` | Print running/stopped state and PID |
 | `analyze` | Parse an `.ibt` file and print lap telemetry |
 | `notes` | Record voice notes stamped with track position |
+| `live` | Live position + gap in seconds to the car directly ahead and behind on track |
 
 ---
 
@@ -84,6 +85,7 @@ Use the **Open** action pointing directly at `motorhome.exe` — no PowerShell w
 .\motorhome.exe analyze 2                        # 2nd most recent
 .\motorhome.exe analyze session.ibt              # specific file
 .\motorhome.exe analyze -lap 3 session.ibt       # specific lap
+.\motorhome.exe analyze -lap pb                  # render stored PB from pb.json
 .\motorhome.exe analyze -update-map session.ibt  # force re-detect segments
 .\motorhome.exe analyze -dump T3 session.ibt     # dump T3 telemetry to CSV
 ```
@@ -110,6 +112,15 @@ Selecting best lap: Lap 2 (1:07.500)
  T1   | entry |   196→  126 |   94% |   98% |   0% | 1.42 |   38.7 |    2 |    0 |   12 |    0 | 0.10s
  T1   | mid   |    82→   91 |    0% |    0% |  22% | 2.14 |   62.4 |    0 |    0 |    0 |    0 | 0.40s
  T1   | exit  |   112→  140 |    0% |    0% |  87% | 1.68 |   31.5 |    1 |    0 |    0 |    3 | 0.00s
+
+vs PB:
+
+ Name | Phase | dSpd        | dBrk  | dPkBr | dThr | dLatG  | dCorr | dABS | dLck | dSpn | dCoast
+------|-------|-------------|-------|-------|------|--------|-------|------|------|------|-------
+ S1   | full  |    +3→   +2 |    +0 |    +0 |   +0 | +0.01 |    +0 |   +0 |   +0 |   +0 | +0.00s
+ T1   | entry |    -4→   +2 |    +2 |    -1 |   +0 | -0.05 |    +1 |   +0 |   +3 |   +0 | +0.05s
+ T1   | mid   |    +1→   -1 |    +0 |    +0 |   -3 | -0.08 |    +0 |   +0 |   +0 |   +0 | +0.10s
+ T1   | exit  |    -2→   -3 |    +0 |    +0 |   -5 | +0.02 |    +0 |   +0 |   +0 |   +1 | +0.00s
 ```
 
 ### Segment table columns
@@ -156,6 +167,28 @@ Hold the configured hotkey while driving to record a voice note. On release, the
 ```
 
 Notes are stored per-session alongside the `.ibt` file name they relate to.
+
+---
+
+## Live Gap
+
+```powershell
+.\motorhome.exe live              # one-shot: position + gap to car ahead/behind
+.\motorhome.exe live -watch       # stream at 5 Hz until Ctrl-C
+.\motorhome.exe live -watch -hz 10
+.\motorhome.exe live -raw         # dump raw LiveData fields (diagnostic)
+```
+
+Reads iRacing's shared-memory segment and prints your current position, lap, and the gap in seconds to the car directly ahead and behind you on track. Names are drawn from the session info YAML.
+
+```
+Track : Silverstone Grand Prix | Car: Porsche 718 Cayman GT4
+Pos 7/24 (class 3/12)  Lap 4 @  34.2%
+Ahead : #22   John Doe             +1.342s
+Behind: #07   Jane Smith           -0.891s
+```
+
+Gap math uses each car's `CarIdxEstTime` when both are on the same lap, otherwise falls back to distance × total-lap estimate. In a solo practice (no other cars) you'll see `(none)` for ahead/behind — that's expected.
 
 ---
 

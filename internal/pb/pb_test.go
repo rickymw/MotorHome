@@ -202,6 +202,182 @@ func TestUpdate_FasterLap_PreservesBrakeEntries(t *testing.T) {
 	}
 }
 
+func TestUpdate_FasterLap_ClearsPhases(t *testing.T) {
+	pbf := File{}
+	Update(pbf, "GT3", "Sebring", 131.5, "2:11.500", "2026-03-01", "")
+	// Simulate stored PB phases.
+	SetPhases(pbf, "GT3", "Sebring", []PBPhase{
+		{SegName: "T1", Kind: "entry", SpeedEntryKPH: 200},
+	})
+	if len(pbf[Key("GT3", "Sebring")].Phases) != 1 {
+		t.Fatal("phases not stored")
+	}
+
+	// New PB — old phases must be cleared (they belong to the old lap).
+	Update(pbf, "GT3", "Sebring", 130.0, "2:10.000", "2026-03-02", "")
+
+	entry := pbf[Key("GT3", "Sebring")]
+	if len(entry.Phases) != 0 {
+		t.Errorf("Phases should be cleared on new PB, got %d phases", len(entry.Phases))
+	}
+}
+
+func TestSetPhases(t *testing.T) {
+	pbf := File{}
+	Update(pbf, "GT3", "Sebring", 131.5, "2:11.500", "2026-03-01", "")
+	phases := []PBPhase{
+		{SegName: "S1", Kind: "full", SpeedEntryKPH: 180, SpeedExitKPH: 220, ThrottlePct: 95},
+		{SegName: "T1", Kind: "entry", SpeedEntryKPH: 220, SpeedExitKPH: 140, BrakePct: 85},
+		{SegName: "T1", Kind: "mid", SpeedEntryKPH: 140, SpeedExitKPH: 130, LatGAvg: 1.45},
+		{SegName: "T1", Kind: "exit", SpeedEntryKPH: 130, SpeedExitKPH: 160, ThrottlePct: 70},
+	}
+	SetPhases(pbf, "GT3", "Sebring", phases)
+
+	stored := pbf[Key("GT3", "Sebring")].Phases
+	if len(stored) != 4 {
+		t.Fatalf("len(Phases) = %d, want 4", len(stored))
+	}
+	if stored[1].SegName != "T1" || stored[1].Kind != "entry" {
+		t.Errorf("Phase[1] = %s/%s, want T1/entry", stored[1].SegName, stored[1].Kind)
+	}
+	if stored[1].BrakePct != 85 {
+		t.Errorf("Phase[1].BrakePct = %v, want 85", stored[1].BrakePct)
+	}
+}
+
+func TestSetPhases_NoEntry(t *testing.T) {
+	pbf := File{}
+	// SetPhases on non-existent entry should not panic or create entry.
+	SetPhases(pbf, "GT3", "Sebring", []PBPhase{{SegName: "T1", Kind: "full"}})
+	if len(pbf) != 0 {
+		t.Error("SetPhases should not create a PB entry if none exists")
+	}
+}
+
+func TestPhases_Roundtrip(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "pb.json")
+
+	pbf := File{}
+	Update(pbf, "GT3", "Sebring", 131.5, "2:11.500", "2026-03-01", "")
+	SetPhases(pbf, "GT3", "Sebring", []PBPhase{
+		{SegName: "T1", Kind: "entry", SpeedEntryKPH: 200, BrakePct: 80, LatGAvg: 1.2, Corrections: 2, ABSCount: 5},
+		{SegName: "T1", Kind: "mid", SpeedEntryKPH: 140, LatGAvg: 1.45},
+	})
+
+	if err := Save(p, pbf); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	entry := loaded[Key("GT3", "Sebring")]
+	if entry == nil {
+		t.Fatal("entry not found after roundtrip")
+	}
+	if len(entry.Phases) != 2 {
+		t.Fatalf("len(Phases) = %d, want 2", len(entry.Phases))
+	}
+	p0 := entry.Phases[0]
+	if p0.SegName != "T1" || p0.Kind != "entry" {
+		t.Errorf("Phase[0] = %s/%s, want T1/entry", p0.SegName, p0.Kind)
+	}
+	if p0.SpeedEntryKPH != 200 {
+		t.Errorf("SpeedEntryKPH = %v, want 200", p0.SpeedEntryKPH)
+	}
+	if p0.ABSCount != 5 {
+		t.Errorf("ABSCount = %v, want 5", p0.ABSCount)
+	}
+}
+
+func TestPhaseLookup(t *testing.T) {
+	phases := []PBPhase{
+		{SegName: "T1", Kind: "entry"},
+		{SegName: "T1", Kind: "mid"},
+		{SegName: "S2", Kind: "full"},
+	}
+	m := PhaseLookup(phases)
+	if len(m) != 3 {
+		t.Errorf("len = %d, want 3", len(m))
+	}
+	if m[PhaseKey("T1", "mid")] == nil {
+		t.Error("T1|mid not found")
+	}
+	if m[PhaseKey("S2", "full")] == nil {
+		t.Error("S2|full not found")
+	}
+	if m[PhaseKey("T1", "exit")] != nil {
+		t.Error("T1|exit should not exist")
+	}
+}
+
+func TestUpdate_StubEntryFromBrakeEntries(t *testing.T) {
+	// BrakeEntrySet creates a stub entry with LapTime=0 to hold accumulated
+	// brake data. The first real PB must succeed against that stub even though
+	// 0 < newLapTime would make a naive comparison return "stub is faster".
+	pbf := File{}
+	BrakeEntrySet(pbf, "GT3", "Sebring", "T1", 0.42, 5)
+	if pbf[Key("GT3", "Sebring")].LapTime != 0 {
+		t.Fatalf("setup error: stub entry should have LapTime=0")
+	}
+
+	isNew := Update(pbf, "GT3", "Sebring", 131.5, "2:11.500", "2026-03-01", "")
+	if !isNew {
+		t.Fatal("Update against LapTime=0 stub: expected true (new PB), got false")
+	}
+	entry := pbf[Key("GT3", "Sebring")]
+	if entry.LapTime != 131.5 {
+		t.Errorf("LapTime = %v, want 131.5", entry.LapTime)
+	}
+	if entry.BrakeEntries["T1"].Pct != 0.42 {
+		t.Error("BrakeEntries lost when promoting stub to real PB")
+	}
+}
+
+func TestSetSetup(t *testing.T) {
+	pbf := File{}
+	Update(pbf, "GT3", "Sebring", 131.5, "2:11.500", "2026-03-01", "")
+
+	yaml := "CarSetup:\n Tires:\n  LeftFront:\n   ColdPressure: 138 kPa\n"
+	SetSetup(pbf, "GT3", "Sebring", yaml)
+
+	stored := pbf[Key("GT3", "Sebring")].Setup
+	if stored != yaml {
+		t.Errorf("Setup = %q, want %q", stored, yaml)
+	}
+}
+
+func TestSetSetup_NoEntry(t *testing.T) {
+	pbf := File{}
+	SetSetup(pbf, "GT3", "Sebring", "CarSetup:\n")
+	if len(pbf) != 0 {
+		t.Error("SetSetup should not create a PB entry if none exists")
+	}
+}
+
+func TestSetup_Roundtrip(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "pb.json")
+
+	pbf := File{}
+	Update(pbf, "GT3", "Sebring", 131.5, "2:11.500", "2026-03-01", "")
+	yaml := "CarSetup:\n Tires:\n  LeftFront:\n   ColdPressure: 138 kPa\n"
+	SetSetup(pbf, "GT3", "Sebring", yaml)
+
+	if err := Save(p, pbf); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded[Key("GT3", "Sebring")].Setup != yaml {
+		t.Errorf("Setup not preserved across save/load")
+	}
+}
+
 func TestUpdate_IndependentCarTrackCombos(t *testing.T) {
 	pbf := File{}
 	Update(pbf, "Car A", "Track X", 100.0, "1:40.000", "2026-01-01", "")

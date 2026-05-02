@@ -23,7 +23,7 @@ import (
 // pbPath is the path to pb.json; "" disables load/save.
 func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath string) {
 	fs := flag.NewFlagSet("analyze", flag.ExitOnError)
-	lapNum := fs.Int("lap", 0, "lap number to analyze (0 = best completed lap)")
+	lapArg := fs.String("lap", "", "lap to analyze: integer for that lap, \"pb\" for stored PB, empty for best of session")
 	updateMap := fs.Bool("update-map", false, "ignore existing track map and re-detect from this session")
 	dumpSeg := fs.String("dump", "", "dump segment telemetry to CSV (name like T3 or 1-based index)")
 	fs.Usage = func() {
@@ -32,22 +32,40 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath string) {
 		fmt.Fprintln(os.Stderr, "Examples:")
 		fmt.Fprintln(os.Stderr, "  motorhome analyze session.ibt")
 		fmt.Fprintln(os.Stderr, "  motorhome analyze -lap 2 session.ibt")
+		fmt.Fprintln(os.Stderr, "  motorhome analyze -lap pb            (show stored PB lap)")
 		fmt.Fprintln(os.Stderr, "  motorhome analyze -dump T3 session.ibt")
 		fmt.Fprintln(os.Stderr)
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(args)
 
+	// Parse -lap: "" → best, "pb" → PB lap from pb.json, integer → that lap number.
+	lapMode, lapNum, err := parseLapArg(*lapArg)
+	if err != nil {
+		analyzeDie("%v", err)
+	}
+
 	var ibtPath string
 	switch fs.NArg() {
 	case 0:
 		if cfg.IbtDir == "" {
+			// "-lap pb" with no ibtDir falls back to a pure pb.json lookup —
+			// no car/track context, so use the only entry or list.
+			if lapMode == lapModePB {
+				runStoredPBNoIBT(pbPath)
+				return
+			}
 			fs.Usage()
 			os.Exit(1)
 		}
 		var err error
 		ibtPath, err = nthLatestIbtFile(cfg.IbtDir, 1)
 		if err != nil {
+			// Same fallback when ibtDir exists but is empty.
+			if lapMode == lapModePB {
+				runStoredPBNoIBT(pbPath)
+				return
+			}
 			analyzeDie("%v", err)
 		}
 		fmt.Printf("File:    %s\n", filepath.Base(ibtPath))
@@ -84,6 +102,14 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath string) {
 	sessionID := f.DiskHeader().SessionStartDate.UTC().Format(time.RFC3339)
 
 	meta := analysis.ParseSessionMeta(f.SessionInfo(), cfg.Driver)
+
+	// "-lap pb" with an .ibt: use the .ibt only to resolve car/track, then
+	// render the stored PB and exit before the normal analysis flow.
+	if lapMode == lapModePB {
+		runStoredPBForCarTrack(pbPath, meta.CarScreenName, meta.TrackDisplayName)
+		return
+	}
+
 	fmt.Printf("Driver:  %s\n", fallback(meta.DriverName, "(unknown)"))
 	fmt.Printf("Car:     %s\n", fallback(meta.CarScreenName, "(unknown)"))
 	fmt.Printf("Track:   %s\n", fallback(meta.TrackDisplayName, "(unknown)"))
@@ -323,6 +349,14 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath string) {
 		}
 	}
 
+	// Resolve brake entries early — needed for both PB phase storage and phase table.
+	var brakeEntries pb.BrakeEntryMap
+	if meta.CarScreenName != "" && meta.TrackDisplayName != "" {
+		if entry := pbf[pb.Key(meta.CarScreenName, meta.TrackDisplayName)]; entry != nil {
+			brakeEntries = entry.BrakeEntries
+		}
+	}
+
 	// PB tracking: check, update, display (pbf already loaded above).
 	if pbPath != "" && bestLap != nil && meta.CarScreenName != "" && meta.TrackDisplayName != "" {
 		sessionDate := f.DiskHeader().SessionStartDate.Local().Format("2006-01-02")
@@ -333,6 +367,14 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath string) {
 			bestLap.LapTime, formatted, sessionDate, weather)
 
 		if isNew {
+			// Store phase data for the new PB lap so future sessions can compare.
+			if segs != nil {
+				pbPhases := phasesToPB(analysis.ComputePhases(bestLap, segs, brakeEntries))
+				pb.SetPhases(pbf, meta.CarScreenName, meta.TrackDisplayName, pbPhases)
+			}
+			if setupBlock := analysis.ExtractCarSetupBlock(f.SessionInfo()); setupBlock != "" {
+				pb.SetSetup(pbf, meta.CarScreenName, meta.TrackDisplayName, setupBlock)
+			}
 			if err := pb.Save(pbPath, pbf); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not save pb.json: %v\n", err)
 			}
@@ -358,18 +400,149 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath string) {
 	}
 	fmt.Println()
 
-	var brakeEntries pb.BrakeEntryMap
+	// Look up stored PB phases for delta comparison.
+	var pbPhases []pb.PBPhase
 	if meta.CarScreenName != "" && meta.TrackDisplayName != "" {
 		if entry := pbf[pb.Key(meta.CarScreenName, meta.TrackDisplayName)]; entry != nil {
-			brakeEntries = entry.BrakeEntries
+			pbPhases = entry.Phases
 		}
 	}
-	analyzeSingleLap(laps, *lapNum, segs, brakeEntries, *dumpSeg)
+	analyzeSingleLap(laps, lapNum, segs, brakeEntries, pbPhases, *dumpSeg)
+}
+
+// lapMode describes how the -lap flag was resolved.
+type lapMode int
+
+const (
+	lapModeBest lapMode = iota // empty / "0": best lap of the session
+	lapModeNum                 // integer: that specific lap number in the .ibt
+	lapModePB                  // "pb": render the stored PB lap from pb.json
+)
+
+// parseLapArg parses the -lap flag value. Empty/"0" → best, "pb" → PB, otherwise integer.
+func parseLapArg(v string) (lapMode, int, error) {
+	v = strings.TrimSpace(v)
+	if v == "" || v == "0" {
+		return lapModeBest, 0, nil
+	}
+	if strings.EqualFold(v, "pb") {
+		return lapModePB, 0, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, 0, fmt.Errorf("-lap: %q is not a valid lap number, \"pb\", or empty", v)
+	}
+	return lapModeNum, n, nil
+}
+
+// runStoredPBNoIBT prints the stored PB when no .ibt file was given on the
+// command line. Uses the only entry if pb.json has just one; otherwise lists
+// the available entries.
+func runStoredPBNoIBT(pbPath string) {
+	pbf := loadPBOrDie(pbPath)
+	if len(pbf) == 1 {
+		var entry *pb.PersonalBest
+		for _, e := range pbf {
+			entry = e
+		}
+		printStoredPB(entry)
+		return
+	}
+	fmt.Fprintln(os.Stderr, "Multiple PB entries — pass an .ibt file for the session you want, or specify the car/track context:")
+	keys := make([]string, 0, len(pbf))
+	for k := range pbf {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		entry := pbf[k]
+		fmt.Fprintf(os.Stderr, "  %s — %s on %s\n", entry.LapTimeFormatted, entry.Car, entry.Track)
+	}
+	os.Exit(1)
+}
+
+// runStoredPBForCarTrack prints the PB stored for car+track, resolved from
+// the .ibt's session YAML. Errors out if no PB exists for that combination.
+func runStoredPBForCarTrack(pbPath, car, track string) {
+	pbf := loadPBOrDie(pbPath)
+	entry := pbf[pb.Key(car, track)]
+	if entry == nil {
+		analyzeDie("no stored PB for %q on %q — drive a flying lap to set one", car, track)
+	}
+	printStoredPB(entry)
+}
+
+// loadPBOrDie loads pb.json and exits with a clear message if it is missing
+// or empty.
+func loadPBOrDie(pbPath string) pb.File {
+	if pbPath == "" {
+		analyzeDie("no pb.json path configured")
+	}
+	pbf, err := pb.Load(pbPath)
+	if err != nil {
+		analyzeDie("loading pb.json: %v", err)
+	}
+	if len(pbf) == 0 {
+		analyzeDie("no PB entries in %s — drive a flying lap first", pbPath)
+	}
+	return pbf
+}
+
+// printStoredPB renders a stored PB entry: car/track header, setup tables (if
+// stored), and the phase table from the saved phases. Used by "analyze -lap pb".
+func printStoredPB(entry *pb.PersonalBest) {
+	fmt.Printf("Car:   %s\n", fallback(entry.Car, "(unknown)"))
+	fmt.Printf("Track: %s\n", fallback(entry.Track, "(unknown)"))
+	fmt.Printf("PB:    %s — set %s, %s\n\n",
+		entry.LapTimeFormatted, fallback(entry.Date, "?"), fallback(entry.Weather, "weather unknown"))
+
+	if entry.Setup != "" {
+		if nodes := analysis.ParseCarSetupTree(entry.Setup); nodes != nil {
+			printSetupTables(nodes)
+		}
+	}
+
+	if len(entry.Phases) == 0 {
+		fmt.Println("(no phase data stored for this PB — set a new PB to populate it)")
+		return
+	}
+	printStoredPhaseTable(entry.LapTimeFormatted, entry.Phases)
+}
+
+// printStoredPhaseTable mirrors printPhaseTable but works from stored PBPhase
+// records (no Lap/Samples context).
+func printStoredPhaseTable(lapTimeFormatted string, phases []pb.PBPhase) {
+	fmt.Printf("PB lap — %s\n\n", lapTimeFormatted)
+
+	nameW := 4
+	for _, p := range phases {
+		if len(p.SegName) > nameW {
+			nameW = len(p.SegName)
+		}
+	}
+	hdr := fmt.Sprintf(" %-*s | Phase | Spd         | OnBrk | PkBrk | Thr%% | LatG | Wheel° | Corr | ABS  | Lock | Spin | Coast", nameW, "Name")
+	sep := fmt.Sprintf("-%s-|-------|-------------|-------|-------|------|------|--------|------|------|------|------|------", dashes(nameW))
+	fmt.Println(hdr)
+	fmt.Println(sep)
+	for _, p := range phases {
+		if p.SampleCount == 0 {
+			continue
+		}
+		coastSecs := float32(p.CoastSamples) / 60.0
+		fmt.Printf(" %-*s | %-5s | %5.0f→%5.0f | %4.0f%% | %4.0f%% | %3.0f%% | %4.2f | %6.1f | %4d | %4d | %4d | %4d | %5.2fs\n",
+			nameW, p.SegName, p.Kind,
+			p.SpeedEntryKPH, p.SpeedExitKPH,
+			p.BrakePct, p.PeakBrakePct, p.ThrottlePct,
+			p.LatGAvg,
+			p.PeakSteerDeg, p.Corrections,
+			p.ABSCount, p.LockupSamples, p.WheelspinSamples, coastSecs)
+	}
+	fmt.Println()
 }
 
 // ---- single lap ----
 
-func analyzeSingleLap(laps []analysis.Lap, lapNum int, segs []trackmap.Segment, brakeEntries pb.BrakeEntryMap, dumpSeg string) {
+func analyzeSingleLap(laps []analysis.Lap, lapNum int, segs []trackmap.Segment, brakeEntries pb.BrakeEntryMap, pbPhases []pb.PBPhase, dumpSeg string) {
 	var lap *analysis.Lap
 	if lapNum > 0 {
 		lap = findAnalyzeLap(laps, lapNum)
@@ -396,6 +569,9 @@ func analyzeSingleLap(laps []analysis.Lap, lapNum int, segs []trackmap.Segment, 
 	if segs != nil {
 		phases := analysis.ComputePhases(lap, segs, brakeEntries)
 		printPhaseTable(lap, phases)
+		if len(pbPhases) > 0 {
+			printPBComparison(phases, pbPhases)
+		}
 	} else {
 		printZoneTable(lap, analysis.ZoneStats(lap))
 	}
@@ -650,6 +826,99 @@ func printTyreSummary(lap *analysis.Lap) {
 			r.c.TempOuter, r.c.TempMid, r.c.TempInner,
 			wornO, wornM, wornI,
 			r.c.PressureKPa)
+	}
+	fmt.Println()
+}
+
+// ---- PB comparison ----
+
+// phasesToPB converts analysis phases to the PB storage format.
+func phasesToPB(phases []analysis.Phase) []pb.PBPhase {
+	out := make([]pb.PBPhase, len(phases))
+	for i, p := range phases {
+		out[i] = pb.PBPhase{
+			SegName:          p.SegName,
+			Kind:             string(p.Kind),
+			SpeedEntryKPH:    p.SpeedEntryKPH,
+			SpeedExitKPH:     p.SpeedExitKPH,
+			BrakePct:         p.BrakePct,
+			PeakBrakePct:     p.PeakBrakePct,
+			ThrottlePct:      p.ThrottlePct,
+			LatGAvg:          p.LatGAvg,
+			PeakSteerDeg:     p.PeakSteerDeg,
+			Corrections:      p.Corrections,
+			ABSCount:         p.ABSCount,
+			LockupSamples:    p.LockupSamples,
+			WheelspinSamples: p.WheelspinSamples,
+			CoastSamples:     p.CoastSamples,
+			SampleCount:      p.SampleCount,
+		}
+	}
+	return out
+}
+
+// printPBComparison prints a delta table comparing the current lap's phases
+// against stored PB phases. Positive speed deltas = faster than PB (good).
+// Positive brake/coast deltas = more than PB (usually bad).
+func printPBComparison(current []analysis.Phase, stored []pb.PBPhase) {
+	lookup := pb.PhaseLookup(stored)
+
+	// Check if any current phase matches a stored phase.
+	hasMatch := false
+	for _, p := range current {
+		if _, ok := lookup[pb.PhaseKey(p.SegName, string(p.Kind))]; ok {
+			hasMatch = true
+			break
+		}
+	}
+	if !hasMatch {
+		return
+	}
+
+	// Find the widest segment name.
+	nameW := 4
+	for _, p := range current {
+		if len(p.SegName) > nameW {
+			nameW = len(p.SegName)
+		}
+	}
+
+	fmt.Println("vs PB:")
+	fmt.Println()
+	hdr := fmt.Sprintf(" %-*s | Phase | dSpd        | dBrk  | dPkBr | dThr | dLatG  | dCorr | dABS | dLck | dSpn | dCoast", nameW, "Name")
+	sep := fmt.Sprintf("-%s-|-------|-------------|-------|-------|------|--------|-------|------|------|------|-------", dashes(nameW))
+	fmt.Println(hdr)
+	fmt.Println(sep)
+
+	for _, p := range current {
+		if p.SampleCount == 0 {
+			continue
+		}
+		key := pb.PhaseKey(p.SegName, string(p.Kind))
+		ref, ok := lookup[key]
+		if !ok {
+			// No matching PB phase — skip row.
+			continue
+		}
+
+		dSpdIn := p.SpeedEntryKPH - ref.SpeedEntryKPH
+		dSpdOut := p.SpeedExitKPH - ref.SpeedExitKPH
+		dBrk := p.BrakePct - ref.BrakePct
+		dPkBr := p.PeakBrakePct - ref.PeakBrakePct
+		dThr := p.ThrottlePct - ref.ThrottlePct
+		dLatG := p.LatGAvg - ref.LatGAvg
+		dCorr := p.Corrections - ref.Corrections
+		dABS := p.ABSCount - ref.ABSCount
+		dLck := p.LockupSamples - ref.LockupSamples
+		dSpn := p.WheelspinSamples - ref.WheelspinSamples
+		dCoast := float32(p.CoastSamples-ref.CoastSamples) / 60.0
+
+		fmt.Printf(" %-*s | %-5s | %+5.0f→%+5.0f | %+5.0f | %+5.0f | %+4.0f | %+5.2f | %+5d | %+4d | %+4d | %+4d | %+6.2fs\n",
+			nameW, p.SegName, p.Kind,
+			dSpdIn, dSpdOut,
+			dBrk, dPkBr, dThr,
+			dLatG,
+			dCorr, dABS, dLck, dSpn, dCoast)
 	}
 	fmt.Println()
 }

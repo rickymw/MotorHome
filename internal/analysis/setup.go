@@ -13,21 +13,15 @@ type SetupNode struct {
 // ParseCarSetupTree parses the CarSetup YAML block into a tree of SetupNodes.
 // Returns nil if no CarSetup section is found.
 func ParseCarSetupTree(yaml string) []SetupNode {
-	idx := strings.Index(yaml, "\nCarSetup:\n")
-	if idx < 0 {
-		if strings.HasPrefix(yaml, "CarSetup:\n") {
-			idx = -1 // so idx+1 == 0
-		} else {
-			return nil
-		}
+	block := ExtractCarSetupBlock(yaml)
+	if block == "" {
+		return nil
 	}
-	// Extract lines belonging to the CarSetup block.
-	block := yaml[idx+1:]
 	lines := strings.Split(block, "\n")
-
 	// Skip the "CarSetup:" header line.
-	lines = lines[1:]
-
+	if len(lines) > 0 {
+		lines = lines[1:]
+	}
 	// Collect only indented lines (stop at next top-level key).
 	var indented []string
 	for _, line := range lines {
@@ -42,6 +36,34 @@ func ParseCarSetupTree(yaml string) []SetupNode {
 
 	nodes, _ := parseNodes(indented, 0)
 	return nodes
+}
+
+// ExtractCarSetupBlock returns the "CarSetup:" section of a session YAML
+// document as a standalone string starting with the "CarSetup:" header line
+// and ending just before the next top-level key. Returns "" if there is no
+// CarSetup section. The returned block is a valid input for ParseCarSetupTree.
+func ExtractCarSetupBlock(yaml string) string {
+	idx := strings.Index(yaml, "\nCarSetup:\n")
+	if idx < 0 {
+		if !strings.HasPrefix(yaml, "CarSetup:\n") {
+			return ""
+		}
+		idx = -1 // so idx+1 == 0
+	}
+	block := yaml[idx+1:]
+	// Trim trailing top-level keys: keep the header plus only indented lines.
+	lines := strings.Split(block, "\n")
+	end := 1 // include the header
+	for ; end < len(lines); end++ {
+		line := lines[end]
+		if len(line) == 0 {
+			continue
+		}
+		if line[0] != ' ' && line[0] != '\t' {
+			break
+		}
+	}
+	return strings.Join(lines[:end], "\n")
 }
 
 // parseNodes recursively parses indented lines into SetupNodes.

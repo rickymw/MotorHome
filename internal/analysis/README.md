@@ -15,7 +15,12 @@ Extracts per-lap statistics from iRacing `.ibt` telemetry samples.
 
 `ExtractLaps` scans all samples and splits at S/F crossings: any step where `LapDistPct` drops by more than 0.5. A single-sample artifact (iRacing briefly sets `LapDistPct=0` at the exact crossing frame) is absorbed rather than creating a spurious extra lap. Laps shorter than 300 samples (5 s at 60 Hz) are discarded.
 
-**Lap timing:** `LapLastLapTime` is read from the S/F crossing frame (the artifact frame in the zero-artifact case, or the first frame of the new lap in the normal case). When present and > 0 it is stored as `OfficialLapTime` and used as `LapTime` — matching the time shown in iRacing and third-party tools like Garage61. If the channel is absent, `LapTime` falls back to `SessionTime[last] − SessionTime[first]`, which can differ by up to ~33 ms per boundary.
+**Lap timing:** iRacing publishes `LapLastLapTime` 0.1–1 second *after* the S/F crossing — at the crossing frame itself the channel still holds the previous lap's value (or `-1` for an invalidated lap). `ExtractLaps` therefore tracks LLT across samples; when it changes to a new positive value, that value is the official time of the most recently finalized lap and is stored as `OfficialLapTime` / `LapTime`. This matches the time shown in iRacing and third-party tools like Garage61.
+
+Consequences:
+- The final lap of a recording has no following lap to source LLT from, so it always falls back to `SessionTime[last] − SessionTime[first]` (within ~33 ms of the official time).
+- Invalidated laps (track-limits violations) yield `LLT=-1` in iRacing, which is treated as missing — those laps also fall back to the SessionTime diff.
+- A stale LLT carried over from a previous recording session does not leak onto our laps: the very first LLT sample seen never triggers an "update" because there is no `prevLLT` to compare against yet.
 
 Out/in lap classification uses entry/exit speed: < 5 m/s at the first sample = out lap, < 5 m/s at the last sample = in lap.
 

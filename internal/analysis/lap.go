@@ -320,14 +320,18 @@ const pitSpeedThreshold = float32(5.0)
 // (>0.5), which corresponds to crossing the start/finish line.
 //
 // LapTime is authoritative: it is set from LapLastLapTime (the game's
-// official time, captured at the S/F crossing) when that channel is present,
-// otherwise it falls back to SessionTime[last] − SessionTime[first].
+// official time, observed when iRacing publishes it ~0.1–1s into the next
+// lap) when that channel is present, otherwise it falls back to
+// SessionTime[last] − SessionTime[first]. The final lap of a recording has
+// no following lap to source LLT from and always uses the SessionTime diff.
+// Invalidated laps (track-limits violations) yield LLT=-1 in iRacing and
+// also fall back to the SessionTime diff.
 // IsPartialStart flags laps where recording began mid-lap; those are excluded
 // from best-lap selection.
 type Lap struct {
 	Number           int
 	LapTime          float32 // seconds: official (LapLastLapTime) or SessionTime diff
-	OfficialLapTime  float32 // raw LapLastLapTime from the crossing frame; 0 if absent
+	OfficialLapTime  float32 // LapLastLapTime captured during the following lap; 0 if absent
 	Kind             LapKind
 	StartSessionTime float64 // SessionTime of first sample (for timeAtPct)
 	IsPartialStart   bool    // true if recording started mid-lap (DistPct > 0.05)
@@ -346,6 +350,13 @@ const MinSamplesForValidLap = 300
 //
 // Single-sample artifacts (iRacing briefly sets Lap=0 at each S/F crossing)
 // are absorbed into the adjacent lap rather than creating their own entry.
+//
+// Lap timing comes from the LapLastLapTime channel. iRacing does NOT update
+// that channel at the S/F crossing — it lags by 0.1–1s into the new lap,
+// then settles to the time of the lap that just ended. We therefore track
+// LLT across samples; when it changes to a new positive value we apply it
+// to the most recently finalized lap. The lap currently in progress (cur)
+// hasn't ended yet, so it never receives an LLT update from this mechanism.
 func ExtractLaps(f *ibt.File) ([]Lap, error) {
 	n := f.NumSamples()
 	if n == 0 {
@@ -355,6 +366,8 @@ func ExtractLaps(f *ibt.File) ([]Lap, error) {
 	var laps []Lap
 	var cur *Lap
 	var prevDist float32 = -1
+	var prevLLT float32
+	var hasPrevLLT bool
 
 	for i := 0; i < n; i++ {
 		s, err := f.Sample(i)
@@ -363,41 +376,41 @@ func ExtractLaps(f *ibt.File) ([]Lap, error) {
 		}
 		sd := extractSample(s)
 
+		// Detect the crossing FIRST so the just-ended lap is finalized and
+		// appended before we apply any LLT update on the same sample. This
+		// matters when the artifact frame is the first sample to carry the
+		// new LLT value.
+
 		// Skip the single-sample Lap=0 artifact that iRacing emits at the
 		// exact S/F crossing frame. It has DistPct=0.0000 but the surrounding
 		// samples sit at ~0.03-0.04, so it's easily filtered.
-		if i > 0 && prevDist > sfDropThreshold && sd.LapDistPct == 0 {
-			// This is the crossing artifact frame. iRacing updates LapLastLapTime
-			// on this frame — capture it before discarding the sample.
-			if cur != nil {
-				if lt, ok := s.Float32("LapLastLapTime"); ok && lt > 0 {
-					cur.OfficialLapTime = lt
-				}
-				if len(cur.Samples) >= MinSamplesForValidLap {
-					finalizeLap(cur)
-					laps = append(laps, *cur)
-				}
+		artifactCrossing := i > 0 && prevDist > sfDropThreshold && sd.LapDistPct == 0
+		// Normal S/F crossing (no zero-frame artifact):
+		// DistPct jumps backward by more than 0.5 in consecutive samples.
+		normalCrossing := !artifactCrossing && prevDist >= 0 && prevDist-sd.LapDistPct > sfDropThreshold
+
+		if artifactCrossing || normalCrossing {
+			if cur != nil && len(cur.Samples) >= MinSamplesForValidLap {
+				finalizeLap(cur)
+				laps = append(laps, *cur)
 			}
 			cur = &Lap{Number: len(laps) + 1}
+		}
+
+		// LLT update — applies to the most recently finalized lap.
+		if lt, ok := s.Float32("LapLastLapTime"); ok {
+			if hasPrevLLT && lt != prevLLT && lt > 0 && len(laps) > 0 {
+				laps[len(laps)-1].OfficialLapTime = lt
+				laps[len(laps)-1].LapTime = lt
+			}
+			prevLLT = lt
+			hasPrevLLT = true
+		}
+
+		if artifactCrossing {
 			// Don't append this sample; prevDist stays as-is so next sample
 			// is treated as the real start of the new lap.
 			continue
-		}
-
-		// Normal S/F crossing (no zero-frame artifact):
-		// DistPct jumps backward by more than 0.5 in consecutive samples.
-		// LapLastLapTime is updated on the first frame of the new lap (sd here).
-		if prevDist >= 0 && prevDist-sd.LapDistPct > sfDropThreshold {
-			if cur != nil {
-				if lt, ok := s.Float32("LapLastLapTime"); ok && lt > 0 {
-					cur.OfficialLapTime = lt
-				}
-				if len(cur.Samples) >= MinSamplesForValidLap {
-					finalizeLap(cur)
-					laps = append(laps, *cur)
-				}
-			}
-			cur = &Lap{Number: len(laps) + 1}
 		}
 
 		if cur == nil {
@@ -422,8 +435,9 @@ func ExtractLaps(f *ibt.File) ([]Lap, error) {
 }
 
 // finalizeLap sets LapTime and Kind from the samples.
-// LapTime prefers OfficialLapTime (from LapLastLapTime at the S/F crossing)
-// over the SessionTime diff, which misses fractional time at the boundaries.
+// LapTime prefers OfficialLapTime (from LapLastLapTime, set in ExtractLaps
+// once iRacing publishes it during the following lap) over the SessionTime
+// diff, which misses fractional time at the boundaries.
 func finalizeLap(lap *Lap) {
 	if len(lap.Samples) == 0 {
 		return

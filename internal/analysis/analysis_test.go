@@ -885,14 +885,20 @@ func TestExtractLaps_ZeroArtifact(t *testing.T) {
 }
 
 func TestExtractLaps_OfficialLapTime(t *testing.T) {
-	// LapLastLapTime on the first frame of the new lap should become LapTime.
+	// In real iRacing data LapLastLapTime is published a few frames after the
+	// S/F crossing. Simulate that lag: lap 1 has LLT=0 throughout, lap 2's
+	// first frame still carries 0, then partway into lap 2 LLT updates to 5.5
+	// (the time of the lap that just ended). That update must be assigned to
+	// lap 1, even though it arrives after lap 1 has been finalized.
 	// SessionTime diff would give (lap1N-1)/60 ≈ 5.317s; official time is 5.500s.
 	const lap1N = 320
 	lap1 := makeLapSamples(lap1N, 0.01, 0.99, 30, 0)
 
-	// First frame of lap 2 carries LapLastLapTime = 5.5 (the official time for lap 1).
 	lap2 := makeLapSamples(50, 0.02, 0.30, 30, float64(lap1N)/60.0)
-	lap2[0].LapLastLapTime = 5.5
+	// LLT publishes 10 frames into lap 2.
+	for i := 10; i < len(lap2); i++ {
+		lap2[i].LapLastLapTime = 5.5
+	}
 
 	samples := append(lap1, lap2...)
 
@@ -919,13 +925,17 @@ func TestExtractLaps_OfficialLapTime(t *testing.T) {
 }
 
 func TestExtractLaps_OfficialLapTime_ZeroArtifact(t *testing.T) {
-	// When the zero-artifact frame carries LapLastLapTime, it must be captured
-	// even though the frame is not appended to either lap.
+	// Same lagged-publish behaviour as the prior test, but with a zero-artifact
+	// frame at the crossing. LLT updates partway into lap 2; the artifact
+	// itself doesn't carry the value but the post-artifact samples do.
 	const lap1N = 320
 	lap1 := makeLapSamples(lap1N, 0.01, 0.99, 30, 0)
 
-	artifact := lbSample{LapDistPct: 0.0, Speed: 30, SessionTime: float64(lap1N) / 60.0, LapLastLapTime: 5.6}
+	artifact := lbSample{LapDistPct: 0.0, Speed: 30, SessionTime: float64(lap1N) / 60.0}
 	lap2 := makeLapSamples(50, 0.01, 0.30, 30, float64(lap1N+1)/60.0)
+	for i := 10; i < len(lap2); i++ {
+		lap2[i].LapLastLapTime = 5.6
+	}
 
 	samples := append(lap1, artifact)
 	samples = append(samples, lap2...)
@@ -949,6 +959,105 @@ func TestExtractLaps_OfficialLapTime_ZeroArtifact(t *testing.T) {
 	}
 	if laps[0].LapTime != 5.6 {
 		t.Errorf("lap 1: LapTime=%.3f, want 5.600 (official should win)", laps[0].LapTime)
+	}
+}
+
+func TestExtractLaps_LaggedLLT_MultipleLaps(t *testing.T) {
+	// Real iRacing data shows LLT carries the PREVIOUS lap's time across the
+	// S/F crossing, then settles to the just-ended lap's time partway into the
+	// new lap. With a stale value at the crossing and an invalidated middle
+	// lap (LLT=-1), the old "capture at crossing" code mis-attributed every
+	// time and missed the final lap's PB entirely. Reproduce that scenario
+	// across 4 laps + a partial in-lap and assert each lap gets the right time.
+	const N = 320
+	t0 := func(n int) float64 { return float64(n) / 60.0 }
+
+	// Stale LLT from a prior recording session.
+	const stalePrev float32 = 101.983
+	// Real per-lap times (published one lap late by iRacing).
+	const lapATime float32 = 91.420 // valid but invalidated by track limits → published as -1
+	const lapBTime float32 = 90.427
+	const lapCTime float32 = 90.322
+	const lapDTime float32 = 89.992
+
+	lapA := makeLapSamples(N, 0.01, 0.99, 30, t0(0))
+	lapB := makeLapSamples(N, 0.01, 0.99, 30, t0(N))
+	lapC := makeLapSamples(N, 0.01, 0.99, 30, t0(2*N))
+	lapD := makeLapSamples(N, 0.01, 0.99, 30, t0(3*N))
+	inLap := makeLapSamples(60, 0.02, 0.30, 4, t0(4*N)) // ends at low speed
+
+	// LLT carries the previous-recording value at the start of every lap, then
+	// switches to the just-ended lap's actual time 15 frames in.
+	const settle = 15
+	for i := range lapA {
+		lapA[i].LapLastLapTime = stalePrev
+	}
+	for i := range lapB {
+		if i < settle {
+			lapB[i].LapLastLapTime = stalePrev
+		} else {
+			lapB[i].LapLastLapTime = -1 // lap A invalidated
+		}
+	}
+	for i := range lapC {
+		if i < settle {
+			lapC[i].LapLastLapTime = -1
+		} else {
+			lapC[i].LapLastLapTime = lapBTime
+		}
+	}
+	for i := range lapD {
+		if i < settle {
+			lapD[i].LapLastLapTime = lapBTime
+		} else {
+			lapD[i].LapLastLapTime = lapCTime
+		}
+	}
+	for i := range inLap {
+		if i < settle {
+			inLap[i].LapLastLapTime = lapCTime
+		} else {
+			inLap[i].LapLastLapTime = lapDTime
+		}
+	}
+
+	samples := append(append(append(append(lapA, lapB...), lapC...), lapD...), inLap...)
+	path := buildLapIBTFile(t, samples)
+	f, err := ibt.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer f.Close()
+
+	laps, err := ExtractLaps(f)
+	if err != nil {
+		t.Fatalf("ExtractLaps: %v", err)
+	}
+	if len(laps) != 5 {
+		t.Fatalf("expected 5 laps, got %d", len(laps))
+	}
+
+	// Lap A: invalidated → no OfficialLapTime; falls back to SessionTime diff.
+	if laps[0].OfficialLapTime != 0 {
+		t.Errorf("lap A: OfficialLapTime=%.3f, want 0 (invalidated)", laps[0].OfficialLapTime)
+	}
+	// Lap B, C, D: official time captured from lagged LLT update in next lap.
+	if math.Abs(float64(laps[1].LapTime-lapBTime)) > 0.001 {
+		t.Errorf("lap B: LapTime=%.3f, want %.3f", laps[1].LapTime, lapBTime)
+	}
+	if math.Abs(float64(laps[2].LapTime-lapCTime)) > 0.001 {
+		t.Errorf("lap C: LapTime=%.3f, want %.3f", laps[2].LapTime, lapCTime)
+	}
+	// Lap D's time is published during the partial in-lap.
+	if math.Abs(float64(laps[3].LapTime-lapDTime)) > 0.001 {
+		t.Errorf("lap D: LapTime=%.3f, want %.3f (PB lost in old code)", laps[3].LapTime, lapDTime)
+	}
+	// Stale value from before the recording must NOT have leaked onto any of
+	// our laps.
+	for i, l := range laps {
+		if l.OfficialLapTime == stalePrev {
+			t.Errorf("lap %d: OfficialLapTime=%.3f matches stale pre-recording value", i+1, l.OfficialLapTime)
+		}
 	}
 }
 
