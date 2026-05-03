@@ -13,18 +13,37 @@ import (
 // LiveData holds a snapshot of iRacing live telemetry.
 // All fields are zero/false when iRacing is not connected.
 // ErrMsg is non-empty when ReadLiveData failed for a diagnosable reason.
+//
+// CarIdx* slices are indexed by CarIdx (0..N-1 where N is iRacing's published
+// car-array length, typically 64). Entries whose LapDistPct is negative are
+// invalid — iRacing uses that to mean "car not on track / pitted / disconnected".
 type LiveData struct {
 	Connected   bool
 	SessionTime float64
-	LapDistPct  float32 // 0.0–1.0 fraction of lap distance from S/F line
+	LapDistPct  float32 // 0.0–1.0 fraction of lap distance from S/F line (player's car)
 	Track       string
 	Car         string
 	ErrMsg      string // diagnostic; empty on success
+
+	MyCarIdx            int32 // player's CarIdx from session YAML (−1 if unresolved)
+	CarIdxLapDistPct    []float32
+	CarIdxLapCompleted  []int32
+	CarIdxEstTime       []float32
+	CarIdxPosition      []int32
+	CarIdxClassPosition []int32
+
+	// Drivers is keyed by CarIdx. Only populated for slots that had a driver
+	// block in the session YAML.
+	Drivers map[int32]DriverInfo
 }
 
 // iRacing shared memory layout constants.
 const (
-	memMapName = "Local\\IRSDKMemMap"
+	// Exactly matches IRSDK_MEMMAPFILENAME in iRacing's public SDK header
+	// (irsdk_defines.h). Earlier versions of this file used the shorter
+	// "Local\\IRSDKMemMap" — wrong — which caused OpenFileMappingW to return
+	// ERROR_FILE_NOT_FOUND even while iRacing was running on-track.
+	memMapName = "Local\\IRSDKMemMapFileName"
 
 	// irsdk_header field offsets (bytes from base of mapped memory)
 	hdrOffStatus         = 4
@@ -44,9 +63,11 @@ const (
 	varHeaderSize    = 144
 	vhOffType        = 0
 	vhOffDataOffset  = 4
+	vhOffCount       = 8 // number of array entries (1 for scalars, >1 for CarIdx* arrays)
 	vhOffName        = 16 // 32 bytes, null-terminated
 
 	// iRacing variable type codes
+	varTypeInt    = 2
 	varTypeFloat  = 4
 	varTypeDouble = 5
 
@@ -72,6 +93,7 @@ var (
 type varInfo struct {
 	varType    int32
 	dataOffset int32
+	count      int32
 }
 
 // ReadLiveData reads a snapshot from iRacing shared memory.
@@ -112,10 +134,11 @@ func ReadLiveData() LiveData {
 		vhBase := varHeaderOff + i*varHeaderSize
 		vType := readInt32(base, vhBase+vhOffType)
 		dataOff := readInt32(base, vhBase+vhOffDataOffset)
+		count := readInt32(base, vhBase+vhOffCount)
 		nameBytes := (*[32]byte)(unsafe.Add(base, vhBase+vhOffName))[:]
 		name := nullTermString(nameBytes)
 		if name != "" {
-			vars[name] = varInfo{varType: vType, dataOffset: dataOff}
+			vars[name] = varInfo{varType: vType, dataOffset: dataOff, count: count}
 		}
 	}
 
@@ -146,7 +169,27 @@ func ReadLiveData() LiveData {
 		ld.LapDistPct = readFloat32(base, dataBase+int(v.dataOffset))
 	}
 
-	// Parse session info YAML for track and car names
+	// CarIdx arrays — each is indexed by CarIdx. Count is published per-variable
+	// in the header (typically 64). We copy into Go slices so callers can use
+	// the data after we unmap.
+	if v, ok := vars["CarIdxLapDistPct"]; ok && v.varType == varTypeFloat {
+		ld.CarIdxLapDistPct = readFloat32Slice(base, dataBase+int(v.dataOffset), int(v.count))
+	}
+	if v, ok := vars["CarIdxLapCompleted"]; ok && v.varType == varTypeInt {
+		ld.CarIdxLapCompleted = readInt32Slice(base, dataBase+int(v.dataOffset), int(v.count))
+	}
+	if v, ok := vars["CarIdxEstTime"]; ok && v.varType == varTypeFloat {
+		ld.CarIdxEstTime = readFloat32Slice(base, dataBase+int(v.dataOffset), int(v.count))
+	}
+	if v, ok := vars["CarIdxPosition"]; ok && v.varType == varTypeInt {
+		ld.CarIdxPosition = readInt32Slice(base, dataBase+int(v.dataOffset), int(v.count))
+	}
+	if v, ok := vars["CarIdxClassPosition"]; ok && v.varType == varTypeInt {
+		ld.CarIdxClassPosition = readInt32Slice(base, dataBase+int(v.dataOffset), int(v.count))
+	}
+
+	// Parse session info YAML for track/car names, player CarIdx, and all drivers.
+	ld.MyCarIdx = -1
 	sessionInfoOff := int(readInt32(base, hdrOffSessionInfoOff))
 	sessionInfoLen := int(readInt32(base, hdrOffSessionInfoLen))
 	if sessionInfoLen > 0 && sessionInfoLen < maxSessionInfoBytes {
@@ -154,6 +197,8 @@ func ReadLiveData() LiveData {
 		yaml := strings.TrimRight(string(raw), "\x00")
 		ld.Track = yamlField(yaml, "TrackDisplayName")
 		ld.Car = yamlField(yaml, "CarScreenName")
+		ld.MyCarIdx = DriverCarIdxFromYAML(yaml)
+		ld.Drivers = ParseDrivers(yaml)
 	}
 
 	return ld
@@ -185,6 +230,30 @@ func readFloat32(base unsafe.Pointer, off int) float32 {
 
 func readFloat64(base unsafe.Pointer, off int) float64 {
 	return *(*float64)(unsafe.Add(base, off))
+}
+
+// readFloat32Slice copies `count` float32s starting at `off` into a new Go
+// slice. Copying is mandatory: the caller keeps the slice after we unmap the
+// shared memory view.
+func readFloat32Slice(base unsafe.Pointer, off, count int) []float32 {
+	if count <= 0 {
+		return nil
+	}
+	src := unsafe.Slice((*float32)(unsafe.Add(base, off)), count)
+	dst := make([]float32, count)
+	copy(dst, src)
+	return dst
+}
+
+// readInt32Slice copies `count` int32s starting at `off` into a new Go slice.
+func readInt32Slice(base unsafe.Pointer, off, count int) []int32 {
+	if count <= 0 {
+		return nil
+	}
+	src := unsafe.Slice((*int32)(unsafe.Add(base, off)), count)
+	dst := make([]int32, count)
+	copy(dst, src)
+	return dst
 }
 
 func itoa(n int32) string { return strconv.Itoa(int(n)) }

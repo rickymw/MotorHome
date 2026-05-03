@@ -21,9 +21,10 @@ func defaultConfigPath() string {
 func main() {
 	cfgPath := flag.String("config", defaultConfigPath(), "path to config file")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: motorhome [-config <path>] <start|stop|status|analyze|notes>")
+		fmt.Fprintln(os.Stderr, "Usage: motorhome [-config <path>] <start|stop|status|analyze|notes|live>")
 		fmt.Fprintln(os.Stderr, "       motorhome analyze [-lap N] [-update-map] [file.ibt]")
 		fmt.Fprintln(os.Stderr, "       motorhome notes [set-hotkey]")
+		fmt.Fprintln(os.Stderr, "       motorhome live [-watch] [-hz N] [-raw]")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -49,6 +50,8 @@ func main() {
 		RunAnalyze(args[1:], cfg, trackmapPath, pbPath)
 	case "notes":
 		RunNotes(args[1:], cfg, notesDir, *cfgPath)
+	case "live":
+		RunLive(args[1:], cfg)
 	default:
 		pm := launcher.NewProcessManager()
 		switch args[0] {
