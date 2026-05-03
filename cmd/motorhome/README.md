@@ -13,6 +13,8 @@ Parses the `-config` flag, loads the config file, and dispatches to one of five 
 | `main.go` | Flag parsing, config load, subcommand dispatch |
 | `analyze.go` | `RunAnalyze` — full analyze subcommand implementation |
 | `analyze_test.go` | Tests for analyze output formatting |
+| `clipboard.go` | `captureStdout` / `copyToClipboard` — tee analyze stdout into a buffer and pipe it into `clip.exe` (Windows) / `pbcopy` (macOS) |
+| `clipboard_test.go` | Tests for stdout capture and restore |
 | `notes.go` | `RunNotes` — notes subcommand: hotkey listen, record, transcribe, save |
 
 ## Dispatch
@@ -41,6 +43,8 @@ Runtime file paths are all derived from the config file's directory:
 6. Update geometry counters; save trackmap
 7. Load pb.json; update PB if new; save
 8. Print header, lap list, segment table or comparison table
+
+Stdout is wrapped by `captureStdout` in `main.go` so the full analyze output is teed into a buffer while still streaming to the terminal; after `RunAnalyze` returns, the buffer is piped into `clip.exe` (Windows) / `pbcopy` (macOS) so the user can paste it straight into Claude. `analyzeDie` calls `os.Exit(1)` which skips the deferred clipboard write — partial broken output is intentionally not copied.
 
 Flags: `-lap N`, `-compare N,M`, `-update-map`, `-geo-method latlon|lataccel`
 

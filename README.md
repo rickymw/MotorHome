@@ -90,6 +90,8 @@ Use the **Open** action pointing directly at `motorhome.exe` — no PowerShell w
 .\motorhome.exe analyze -dump T3 session.ibt     # dump T3 telemetry to CSV
 ```
 
+The full output is automatically copied to the system clipboard (via `clip.exe`) — paste straight into Claude or another window without redirecting to a file. `(copied to clipboard)` is printed to stderr on success.
+
 ### Example output
 
 ```

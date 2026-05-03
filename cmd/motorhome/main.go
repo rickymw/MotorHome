@@ -47,7 +47,19 @@ func main() {
 
 	switch args[0] {
 	case "analyze":
+		finish, err := captureStdout()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: clipboard capture disabled: %v\n", err)
+			RunAnalyze(args[1:], cfg, trackmapPath, pbPath)
+			return
+		}
 		RunAnalyze(args[1:], cfg, trackmapPath, pbPath)
+		out := finish()
+		if err := copyToClipboard(out); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not copy to clipboard: %v\n", err)
+		} else {
+			fmt.Fprintln(os.Stderr, "(copied to clipboard)")
+		}
 	case "notes":
 		RunNotes(args[1:], cfg, notesDir, *cfgPath)
 	case "live":
