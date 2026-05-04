@@ -206,18 +206,6 @@ func effectiveSegEntry(seg trackmap.Segment, brakeEntries pb.BrakeEntryMap) floa
 	return seg.EntryPct
 }
 
-// EffectiveEntries builds a []float32 of effective entry percentages from
-// brakeEntries, one per segment. Straights and corners without a stored brake
-// onset keep the geometric EntryPct. This is a convenience helper for callers
-// (e.g. ComputePhases) that need a positional slice rather than a map lookup.
-func EffectiveEntries(segs []trackmap.Segment, brakeEntries pb.BrakeEntryMap) []float32 {
-	entries := make([]float32, len(segs))
-	for i, seg := range segs {
-		entries[i] = effectiveSegEntry(seg, brakeEntries)
-	}
-	return entries
-}
-
 // ComputeBrakeEntries scans flying laps to find the average braking onset
 // point before each corner/chicane segment. For each such segment it scans
 // backward from the geometric corner entry, looking for the start of the

@@ -15,20 +15,6 @@ type BrakeEntry struct {
 // Keys match trackmap.Segment.Name (e.g. "T1", "T2-3").
 type BrakeEntryMap map[string]BrakeEntry
 
-// BrakeEntryLookup returns the stored brake onset pct for a given car, track,
-// and segment name. Returns (0, false) if not found.
-func BrakeEntryLookup(pbf File, car, track, segName string) (float32, bool) {
-	entry, ok := pbf[Key(car, track)]
-	if !ok || entry == nil || entry.BrakeEntries == nil {
-		return 0, false
-	}
-	be, ok := entry.BrakeEntries[segName]
-	if !ok || be.Pct == 0 {
-		return 0, false
-	}
-	return be.Pct, true
-}
-
 // BrakeEntrySet stores or updates a brake entry for a given car/track/segment,
 // blending the new value with any existing stored value using a weighted average.
 // newPct is the new measured onset; newLaps is the number of laps it represents.
