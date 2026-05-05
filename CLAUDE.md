@@ -96,7 +96,7 @@ Key top-level fields:
 ### analyze subcommand flow (`cmd/motorhome/analyze.go`)
 1. Resolve `.ibt` path: explicit, numeric index into `ibtDir`, or most-recent
 2. Open `.ibt`; extract session metadata and laps
-3. Find best flying lap; filter flying laps to within 1.5s of best lap time (drops slow early-practice laps)
+3. Find best flying lap; filter flying laps to within 1.5s of best lap time (drops slow early-practice laps). Both best-lap selection and the within-time filter also reject laps shorter than 70% of the session's median flying-lap time (`plausibleLapMinTime`) — guards against a stitched/phantom `LapLastLapTime` value that iRacing occasionally publishes (e.g. after a session reset/recording gap), which would otherwise be picked as a sub-real "best lap" and corrupt the trackmap and PB. Floor only applies with 2+ flying laps
 4. Load `trackmap.json`; detect from filtered laps if no entry exists (latlon → lataccel fallback)
 5. Compute match score (always lataccel for consistency); compute/blend `brakeEntryPct` on new sessions using filtered laps
 6. Increment `lapsUsed`/`sessionsUsed` once per unique session; save trackmap

@@ -108,6 +108,60 @@ func TestBestAnalyzeLap_AllExcluded(t *testing.T) {
 	}
 }
 
+// TestBestAnalyzeLap_RejectsImplausiblyShortLap reproduces the Laguna Seca
+// case where iRacing published LLT=36.65 for a phantom flying lap; the real
+// flying laps were ~90s. The 36.65s lap must not be picked as best.
+func TestBestAnalyzeLap_RejectsImplausiblyShortLap(t *testing.T) {
+	laps := []analysis.Lap{
+		makeLap(analysis.KindFlying, 36.650, analysis.MinSamplesForValidLap, false),
+		makeLap(analysis.KindFlying, 91.216, analysis.MinSamplesForValidLap, false),
+		makeLap(analysis.KindFlying, 90.614, analysis.MinSamplesForValidLap, false),
+		makeLap(analysis.KindFlying, 90.465, analysis.MinSamplesForValidLap, false),
+		makeLap(analysis.KindFlying, 90.093, analysis.MinSamplesForValidLap, false),
+	}
+	got := bestAnalyzeLap(laps)
+	if got == nil {
+		t.Fatal("bestAnalyzeLap: got nil, want fastest plausible lap")
+	}
+	if got.LapTime != 90.093 {
+		t.Errorf("bestAnalyzeLap: LapTime = %v, want 90.093 (36.650 lap is implausibly short and must be rejected)", got.LapTime)
+	}
+}
+
+// TestPlausibleLapMinTime_NoFloorWithSingleLap ensures we don't over-filter
+// when the session has only one usable flying lap (no median to compare to).
+func TestPlausibleLapMinTime_NoFloorWithSingleLap(t *testing.T) {
+	laps := []analysis.Lap{
+		makeLap(analysis.KindOutLap, 100.0, analysis.MinSamplesForValidLap, false),
+		makeLap(analysis.KindFlying, 90.0, analysis.MinSamplesForValidLap, false),
+	}
+	got := plausibleLapMinTime(laps)
+	if got != 0 {
+		t.Errorf("plausibleLapMinTime with one flying lap = %v, want 0 (insufficient data for floor)", got)
+	}
+}
+
+// TestFlyingLapsWithinTime_ExcludesImplausiblyShort ensures the trackmap
+// detection input doesn't include a phantom short lap even though it's within
+// the +1.5s window of any reasonable best lap.
+func TestFlyingLapsWithinTime_ExcludesImplausiblyShort(t *testing.T) {
+	laps := []analysis.Lap{
+		makeLap(analysis.KindFlying, 36.650, analysis.MinSamplesForValidLap, false),
+		makeLap(analysis.KindFlying, 90.093, analysis.MinSamplesForValidLap, false),
+		makeLap(analysis.KindFlying, 90.465, analysis.MinSamplesForValidLap, false),
+		makeLap(analysis.KindFlying, 90.614, analysis.MinSamplesForValidLap, false),
+	}
+	got := flyingLapsWithinTime(laps, 90.093)
+	if len(got) == 0 {
+		t.Fatal("flyingLapsWithinTime: got 0 laps, want plausible laps near best")
+	}
+	for _, l := range got {
+		if l.LapTime < 60.0 {
+			t.Errorf("flyingLapsWithinTime: included implausible lap with LapTime=%v", l.LapTime)
+		}
+	}
+}
+
 // ---- nthLatestIbtFile tests ----
 
 // createIbtFiles creates n fake .ibt files in dir with 1-second apart mod times.
