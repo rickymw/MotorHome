@@ -100,7 +100,7 @@ Key top-level fields:
 4. Load `trackmap.json`; detect from filtered laps if no entry exists (latlon → lataccel fallback)
 5. Compute match score (always lataccel for consistency); compute/blend `brakeEntryPct` on new sessions using filtered laps
 6. Increment `lapsUsed`/`sessionsUsed` once per unique session; save trackmap
-7. Load `pb.json`; update if new PB; if new PB and segments available, store phase data (`PBPhase`) and the raw `CarSetup:` YAML block (`Setup` field) for the PB lap; save
+7. Load `pb.json`; capture the existing entry's `Phases` into a local `pbPhases` (used later by the vs-PB delta table) *before* mutating the entry; update if new PB; if new PB and segments available, store phase data (`PBPhase`) and the raw `CarSetup:` YAML block (`Setup` field) for the PB lap; save
 8. Print: header (file, driver, car, track) → setup tables (Tyres + Suspension corners parsed from CarSetup YAML) → tyre summary (avg carcass temps, end-of-lap wear, hot pressures, brake bias) → map line → PB line → lap list → phase table → vs PB delta table (if stored PB phases exist)
 
 The full stdout output is also copied to the system clipboard automatically (via `clip.exe` on Windows, `pbcopy` on macOS) — `(copied to clipboard)` is printed to stderr on success. Stdout is teed via an `os.Pipe` swap in `cmd/motorhome/main.go` around the `RunAnalyze` call (helpers in `cmd/motorhome/clipboard.go`); error paths that exit through `analyzeDie` (`os.Exit(1)`) skip the deferred clipboard write by design — partial broken output is intentionally not copied.
@@ -127,6 +127,8 @@ Reads an iRacing shared-memory snapshot via `iracing.ReadLiveData()` and prints 
 ### vs PB delta table
 `Name | Phase | dSpd | dBrk | dPkBr | dThr | dLatG | dCorr | dABS | dLck | dSpn | dCoast`
 — Shown after the phase table when stored PB phases exist. Each value is `current − PB`. Positive speed = faster than PB. Positive brake/coast/error counts = more than PB (usually worse). Phases are matched by segment name + phase kind; unmatched phases (e.g. track map changed) are skipped. Stored in `pb.json` as `phases` array inside `PersonalBest`.
+
+When the current best lap *is* a new PB, the comparison uses the **previous** PB's phases — captured in `analyze.go` before `pb.Update` clears them, so the table shows how much the new PB beat the old lap by rather than comparing the lap to itself. The very first PB for a car/track has no prior to compare against, so the vs-PB table is omitted in that case.
 
 ### Telemetry channels extracted
 SampleData extracts ~60 channels from .ibt files: core timing/position (LapDistPct, SessionTime, Speed, Lat, Lon), driver inputs processed and raw (Throttle/ThrottleRaw, Brake/BrakeRaw, Clutch, Gear, SteeringAngle), engine (RPM), vehicle dynamics (LongAccel, LatAccel, YawRate), driver aids (ABSActive, ABSCutPct, BrakeBias, TCSetting, ABSSetting), wheel speeds (LF/RF/LR/RR), tyre carcass temps (4×3 CL/CM/CR), tyre wear (4×3 L/M/R), tyre pressures (4), brake line pressures (4), fuel (FuelLevel, FuelUsePerHour), and steering feedback (SteeringWheelTorque). Missing channels default to zero.

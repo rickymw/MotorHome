@@ -357,6 +357,17 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath string) {
 		}
 	}
 
+	// Capture the previous PB's phases BEFORE pb.Update overwrites them — when
+	// this lap turns out to be a new PB, the vs-PB delta table must compare
+	// against the lap we just beat, not against the freshly written entry
+	// (which would otherwise compare the lap to itself and show all zeros).
+	var pbPhases []pb.PBPhase
+	if meta.CarScreenName != "" && meta.TrackDisplayName != "" {
+		if entry := pbf[pb.Key(meta.CarScreenName, meta.TrackDisplayName)]; entry != nil {
+			pbPhases = entry.Phases
+		}
+	}
+
 	// PB tracking: check, update, display (pbf already loaded above).
 	if pbPath != "" && bestLap != nil && meta.CarScreenName != "" && meta.TrackDisplayName != "" {
 		sessionDate := f.DiskHeader().SessionStartDate.Local().Format("2006-01-02")
@@ -400,13 +411,6 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath string) {
 	}
 	fmt.Println()
 
-	// Look up stored PB phases for delta comparison.
-	var pbPhases []pb.PBPhase
-	if meta.CarScreenName != "" && meta.TrackDisplayName != "" {
-		if entry := pbf[pb.Key(meta.CarScreenName, meta.TrackDisplayName)]; entry != nil {
-			pbPhases = entry.Phases
-		}
-	}
 	analyzeSingleLap(laps, lapNum, segs, brakeEntries, pbPhases, *dumpSeg)
 }
 
