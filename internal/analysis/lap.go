@@ -335,6 +335,7 @@ type Lap struct {
 	Kind             LapKind
 	StartSessionTime float64 // SessionTime of first sample (for timeAtPct)
 	IsPartialStart   bool    // true if recording started mid-lap (DistPct > 0.05)
+	IsCut            bool    // true if LapDistPct coverage has gaps suggesting a track cut
 	Samples          []SampleData
 }
 
@@ -462,6 +463,73 @@ func finalizeLap(lap *Lap) {
 	default:
 		lap.Kind = KindFlying
 	}
+
+	if lap.Kind == KindFlying {
+		lap.IsCut = detectLapCut(lap.Samples, lap.IsPartialStart)
+	}
+}
+
+// lapCutBins is the number of 1%-of-track LapDistPct bins used to detect
+// shortcuts. iRacing's LapDistPct is a smooth centerline projection — at 60 Hz
+// even the fastest samples are ~0.02% apart on a 6 km track, so any empty 1%
+// bin signals at least ~60 m of skipped track.
+const lapCutBins = 100
+
+// lapCutMinRun is the smallest contiguous span of empty bins that counts as a
+// cut. 3 bins ≈ 3% of the track — about 180 m on Watkins Glen, large enough
+// that scattered sampling noise won't trigger it but small enough to catch a
+// shortcut through a chicane or inner loop.
+const lapCutMinRun = 3
+
+// lapCutMinMaxDistPct is the minimum max LapDistPct required to run the cut
+// check at all. Laps whose samples never approach S/F are likely truncated
+// (recording stopped or pit entry early in the lap) rather than cut, and the
+// trailing empty bins are not meaningful.
+const lapCutMinMaxDistPct float32 = 0.95
+
+// detectLapCut returns true when the lap's LapDistPct coverage has a
+// contiguous gap of lapCutMinRun or more empty bins. Only meaningful for
+// complete flying laps; out/in/partial-start laps return false.
+//
+// iRacing occasionally publishes a positive LapLastLapTime for a lap where
+// the driver shortcut across the track (without invalidating it), so a cut
+// lap can otherwise be picked as the session best and pollute the PB.
+func detectLapCut(samples []SampleData, isPartialStart bool) bool {
+	if isPartialStart || len(samples) < MinSamplesForValidLap {
+		return false
+	}
+	var bins [lapCutBins]bool
+	var maxDist float32
+	for _, s := range samples {
+		if s.LapDistPct < 0 || s.LapDistPct >= 1 {
+			continue
+		}
+		if s.LapDistPct > maxDist {
+			maxDist = s.LapDistPct
+		}
+		bi := int(s.LapDistPct * lapCutBins)
+		if bi >= lapCutBins {
+			bi = lapCutBins - 1
+		}
+		bins[bi] = true
+	}
+	if maxDist < lapCutMinMaxDistPct {
+		return false
+	}
+	// Skip the first and last 2 bins — sampling around S/F is naturally sparse
+	// (artifact frame, settle time) and would yield false positives.
+	maxRun, run := 0, 0
+	for i := 2; i < lapCutBins-2; i++ {
+		if !bins[i] {
+			run++
+			if run > maxRun {
+				maxRun = run
+			}
+		} else {
+			run = 0
+		}
+	}
+	return maxRun >= lapCutMinRun
 }
 
 // extractSample pulls analysis-relevant channels from an ibt.Sample.

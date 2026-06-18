@@ -402,11 +402,15 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath string) {
 
 	fmt.Println("Laps:")
 	for _, l := range laps {
+		label := l.Kind.String()
+		if l.IsCut {
+			label += ", cut"
+		}
 		if l.LapTime > 0 {
 			fmt.Printf("  Lap %2d: %s [%s]\n",
-				l.Number, analysis.FormatLapTime(l.LapTime), l.Kind)
+				l.Number, analysis.FormatLapTime(l.LapTime), label)
 		} else {
-			fmt.Printf("  Lap %2d: incomplete [%s]\n", l.Number, l.Kind)
+			fmt.Printf("  Lap %2d: incomplete [%s]\n", l.Number, label)
 		}
 	}
 	fmt.Println()
@@ -956,7 +960,7 @@ func plausibleLapMinTime(laps []analysis.Lap) float32 {
 	var times []float32
 	for i := range laps {
 		l := &laps[i]
-		if l.Kind != analysis.KindFlying || l.IsPartialStart || l.LapTime <= 0 {
+		if l.Kind != analysis.KindFlying || l.IsPartialStart || l.IsCut || l.LapTime <= 0 {
 			continue
 		}
 		times = append(times, l.LapTime)
@@ -971,18 +975,19 @@ func plausibleLapMinTime(laps []analysis.Lap) float32 {
 	return median * plausibleLapFraction
 }
 
-// flyingLapsWithinTime returns flying, non-partial-start laps whose lap time is
-// within lapTimeFilterDelta of bestTime AND not anomalously short vs the
-// session median. This excludes both early slow laps and stitched/partial LLT
-// values that would skew corner boundaries and brake-entry positions.
-// Falls back to all plausible flying laps only if none pass the filter.
+// flyingLapsWithinTime returns flying, non-partial-start, non-cut laps whose
+// lap time is within lapTimeFilterDelta of bestTime AND not anomalously short
+// vs the session median. This excludes early slow laps, stitched/partial LLT
+// values, and shortcut laps that would skew corner boundaries and brake-entry
+// positions. Falls back to all plausible non-cut flying laps if none pass the
+// time filter.
 func flyingLapsWithinTime(laps []analysis.Lap, bestTime float32) []analysis.Lap {
 	threshold := bestTime + lapTimeFilterDelta
 	minTime := plausibleLapMinTime(laps)
 	var result []analysis.Lap
 	for i := range laps {
 		l := &laps[i]
-		if l.Kind != analysis.KindFlying || l.IsPartialStart || l.LapTime <= 0 {
+		if l.Kind != analysis.KindFlying || l.IsPartialStart || l.IsCut || l.LapTime <= 0 {
 			continue
 		}
 		if l.LapTime < minTime {
@@ -997,7 +1002,7 @@ func flyingLapsWithinTime(laps []analysis.Lap, bestTime float32) []analysis.Lap 
 		// always passes since threshold = bestTime + delta >= bestTime.
 		for i := range laps {
 			l := &laps[i]
-			if l.Kind != analysis.KindFlying || l.IsPartialStart || l.LapTime <= 0 {
+			if l.Kind != analysis.KindFlying || l.IsPartialStart || l.IsCut || l.LapTime <= 0 {
 				continue
 			}
 			if l.LapTime < minTime {
@@ -1023,7 +1028,7 @@ func bestAnalyzeLap(laps []analysis.Lap) *analysis.Lap {
 	var best *analysis.Lap
 	for i := range laps {
 		l := &laps[i]
-		if l.Kind != analysis.KindFlying || l.IsPartialStart {
+		if l.Kind != analysis.KindFlying || l.IsPartialStart || l.IsCut {
 			continue
 		}
 		if len(l.Samples) < analysis.MinSamplesForValidLap || l.LapTime <= 0 {

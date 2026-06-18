@@ -96,7 +96,7 @@ Key top-level fields:
 ### analyze subcommand flow (`cmd/motorhome/analyze.go`)
 1. Resolve `.ibt` path: explicit, numeric index into `ibtDir`, or most-recent
 2. Open `.ibt`; extract session metadata and laps
-3. Find best flying lap; filter flying laps to within 1.5s of best lap time (drops slow early-practice laps). Both best-lap selection and the within-time filter also reject laps shorter than 70% of the session's median flying-lap time (`plausibleLapMinTime`) — guards against a stitched/phantom `LapLastLapTime` value that iRacing occasionally publishes (e.g. after a session reset/recording gap), which would otherwise be picked as a sub-real "best lap" and corrupt the trackmap and PB. Floor only applies with 2+ flying laps
+3. Find best flying lap; filter flying laps to within 1.5s of best lap time (drops slow early-practice laps). Both best-lap selection and the within-time filter also reject laps shorter than 70% of the session's median flying-lap time (`plausibleLapMinTime`) — guards against a stitched/phantom `LapLastLapTime` value that iRacing occasionally publishes (e.g. after a session reset/recording gap), which would otherwise be picked as a sub-real "best lap" and corrupt the trackmap and PB. Floor only applies with 2+ flying laps. Laps flagged `IsCut` (gap in LapDistPct coverage — see Cut lap detection below) are also rejected here
 4. Load `trackmap.json`; detect from filtered laps if no entry exists (latlon → lataccel fallback)
 5. Compute match score (always lataccel for consistency); compute/blend `brakeEntryPct` on new sessions using filtered laps
 6. Increment `lapsUsed`/`sessionsUsed` once per unique session; save trackmap
@@ -138,6 +138,11 @@ SampleData extracts ~60 channels from .ibt files: core timing/position (LapDistP
 
 ### Out/in lap detection
 Out lap: first sample speed < 5 m/s. In lap: last sample speed < 5 m/s. Shown in lap list; excluded from best-lap selection unless forced with `-lap N`.
+
+### Cut lap detection
+Flying laps are scanned for shortcut gaps in `LapDistPct`: the track is binned into 100 buckets and any contiguous run of 3+ empty bins (≈ 180 m of skipped track at Watkins Glen) marks the lap as cut. Gated on `max(LapDistPct) >= 0.95` so a truncated final lap (recording stopped mid-lap) doesn't false-trigger. Cut laps render as `[flying lap, cut]` in the lap list and are excluded from `bestAnalyzeLap`, `flyingLapsWithinTime` (which feeds trackmap detection and brake-entry blending), `plausibleLapMinTime`, and PB updates. `-lap N` still works to inspect a specific cut lap.
+
+Why this matters: iRacing's track-limits enforcement is lenient — a driver who shortcuts across an inner-loop chicane can still get a positive `LapLastLapTime` instead of the `-1` we'd otherwise rely on, and that cut lap will look fastest because it skipped real distance.
 
 ### Driver/car resolution
 `ParseSessionMeta(yaml, driverName)`: match `UserName` case-insensitively → fallback `DriverCarIdx` → first `CarScreenName`.

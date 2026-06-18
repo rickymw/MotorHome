@@ -370,6 +370,103 @@ func TestFinalizeLap_LapTime(t *testing.T) {
 	}
 }
 
+// ---- detectLapCut ----
+
+// uniformDistSamples returns n samples evenly spaced from 0 to nearly 1 in
+// LapDistPct, suitable for cut-detection tests.
+func uniformDistSamples(n int) []SampleData {
+	out := make([]SampleData, n)
+	for i := range out {
+		out[i].LapDistPct = float32(i) / float32(n-1) * 0.999
+		out[i].SessionTime = float64(i) / 60
+		out[i].Speed = 50
+	}
+	return out
+}
+
+func TestDetectLapCut_CompleteLap(t *testing.T) {
+	// 600 dense samples covering the whole track — no cuts.
+	samples := uniformDistSamples(600)
+	lap := &Lap{Samples: samples}
+	finalizeLap(lap)
+	if lap.IsCut {
+		t.Error("complete lap flagged as cut")
+	}
+}
+
+func TestDetectLapCut_ShortcutGap(t *testing.T) {
+	// 600 dense samples but with a 10% gap from pct 0.45 to 0.55 — driver cut
+	// across the inside of a chicane/inner loop.
+	full := uniformDistSamples(600)
+	var samples []SampleData
+	for _, s := range full {
+		if s.LapDistPct >= 0.45 && s.LapDistPct < 0.55 {
+			continue
+		}
+		samples = append(samples, s)
+	}
+	lap := &Lap{Samples: samples}
+	finalizeLap(lap)
+	if !lap.IsCut {
+		t.Error("shortcut lap not flagged as cut")
+	}
+}
+
+func TestDetectLapCut_TruncatedLapNotFlagged(t *testing.T) {
+	// Recording stopped at 60% of the lap — many trailing bins empty but no
+	// real shortcut. maxDistPct < 0.95 should bypass the cut check.
+	full := uniformDistSamples(600)
+	var samples []SampleData
+	for _, s := range full {
+		if s.LapDistPct < 0.60 {
+			samples = append(samples, s)
+		}
+	}
+	lap := &Lap{Samples: samples}
+	finalizeLap(lap)
+	if lap.IsCut {
+		t.Error("truncated lap should not be flagged as cut")
+	}
+}
+
+func TestDetectLapCut_NonFlyingLapNotFlagged(t *testing.T) {
+	// An in lap with a big trailing gap (driver pitted) should not be flagged
+	// — IsCut is only computed for flying laps.
+	full := uniformDistSamples(600)
+	var samples []SampleData
+	for _, s := range full {
+		if s.LapDistPct < 0.30 {
+			samples = append(samples, s)
+		}
+	}
+	// Force in-lap classification by dropping last sample speed below threshold.
+	samples[len(samples)-1].Speed = 1
+	lap := &Lap{Samples: samples}
+	finalizeLap(lap)
+	if lap.Kind != KindInLap {
+		t.Fatalf("Kind = %v, want KindInLap (test setup error)", lap.Kind)
+	}
+	if lap.IsCut {
+		t.Error("non-flying lap should not be flagged as cut")
+	}
+}
+
+func TestDetectLapCut_PartialStartNotFlagged(t *testing.T) {
+	// Lap that starts at 0.30 — partial-start flag suppresses cut detection.
+	full := uniformDistSamples(600)
+	var samples []SampleData
+	for _, s := range full {
+		if s.LapDistPct >= 0.30 {
+			samples = append(samples, s)
+		}
+	}
+	lap := &Lap{Samples: samples, IsPartialStart: true}
+	finalizeLap(lap)
+	if lap.IsCut {
+		t.Error("partial-start lap should not be flagged as cut")
+	}
+}
+
 // ---- zoneIdx ----
 
 func TestZoneIdx(t *testing.T) {

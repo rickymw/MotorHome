@@ -24,6 +24,8 @@ Consequences:
 
 Out/in lap classification uses entry/exit speed: < 5 m/s at the first sample = out lap, < 5 m/s at the last sample = in lap.
 
+**Cut detection:** flying laps are also checked for shortcut gaps in their `LapDistPct` coverage. The lap is binned into 100 1%-of-track buckets; if any contiguous run of 3+ buckets is empty (≈ 180 m skipped at Watkins Glen), the lap is marked `IsCut`. iRacing occasionally accepts a shortcut lap as valid (publishing a positive `LapLastLapTime` instead of `-1`), so this catches the case where a cut lap would otherwise be picked as the session best. The check is gated on `max(LapDistPct) >= 0.95` so that recordings truncated mid-lap don't false-trigger. Cut laps appear in the lap list with `[flying lap, cut]` and are excluded from best-lap selection, trackmap detection, brake-entry blending, the plausible-time floor, and PB updates.
+
 ### Brake entry detection (`zones.go`)
 
 `ComputeBrakeEntries` scans flying laps backward from each corner's geometric entry to find the average point where brake pressure first exceeds 5%. A tolerance of 3 consecutive non-braking samples prevents ABS modulation from terminating the scan early. For the first corner (T1), the scan wraps around the S/F line to detect braking zones that start on the preceding straight (high LapDistPct near 1.0).
@@ -54,7 +56,7 @@ Corners with peak steering < 5° get a single "full" phase. `countSteeringCorrec
 | Symbol | Description |
 |---|---|
 | `SampleData` | ~60 telemetry channels per sample: timing, driver inputs (raw & processed), dynamics, driver aids, wheel speeds, tyre temps/wear/pressure, brake line pressures, fuel, steering torque. |
-| `Lap` | One lap: number, time (`LapLastLapTime` preferred; SessionTime diff fallback), kind, `OfficialLapTime`, `IsPartialStart` flag, and `[]SampleData`. |
+| `Lap` | One lap: number, time (`LapLastLapTime` preferred; SessionTime diff fallback), kind, `OfficialLapTime`, `IsPartialStart` and `IsCut` flags, and `[]SampleData`. |
 | `LapKind` | `KindFlying`, `KindOutLap`, `KindInLap`, `KindOutInLap`. |
 | `Phase` | Per-phase stats: entry/exit speed, brake%, peak brake, throttle%, avg lat G, peak steering angle, steering corrections, ABS, lockup/wheelspin, coast. |
 | `DumpConfig` | Controls CSV dump: downsample rate (default 3 = 20Hz) and context samples (default 60 = 1s). |
