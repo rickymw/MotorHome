@@ -1164,13 +1164,13 @@ func TestComputeTyreSummary_Averages(t *testing.T) {
 	// Two samples: temps should be averaged, wear taken from last sample.
 	samples := []SampleData{
 		{
-			LFtempCL: 80, LFtempCM: 85, LFtempCR: 78,
+			LFtempL: 80, LFtempM: 85, LFtempR: 78,
 			LFwearL: 1.0, LFwearM: 1.0, LFwearR: 1.0,
 			LFpressure: 170,
 			BrakeBias: 0.52,
 		},
 		{
-			LFtempCL: 90, LFtempCM: 95, LFtempCR: 88,
+			LFtempL: 90, LFtempM: 95, LFtempR: 88,
 			LFwearL: 0.99, LFwearM: 0.98, LFwearR: 0.97,
 			LFpressure: 180,
 			BrakeBias: 0.54,
@@ -1179,8 +1179,8 @@ func TestComputeTyreSummary_Averages(t *testing.T) {
 	lap := &Lap{Samples: samples}
 	ts := ComputeTyreSummary(lap)
 
-	// LF is a left-side tyre: CL→Outer, CR→Inner.
-	// Temps: CL avg (80+90)/2=85→Outer, CM avg (85+95)/2=90→Mid, CR avg (78+88)/2=83→Inner
+	// LF is a left-side tyre: tempL→Outer, tempR→Inner.
+	// Temps: tempL avg (80+90)/2=85→Outer, tempM avg (85+95)/2=90→Mid, tempR avg (78+88)/2=83→Inner
 	if ts.LF.TempOuter != 85 {
 		t.Errorf("LF TempOuter = %.1f, want 85.0", ts.LF.TempOuter)
 	}

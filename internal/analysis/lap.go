@@ -260,11 +260,14 @@ type SampleData struct {
 	LRspeed float32
 	RRspeed float32
 
-	// Tyre carcass temperatures (°C) — inner/middle/outer across tread
-	LFtempCL, LFtempCM, LFtempCR float32
-	RFtempCL, RFtempCM, RFtempCR float32
-	LRtempCL, LRtempCM, LRtempCR float32
-	RRtempCL, RRtempCM, RRtempCR float32
+	// Tyre surface (tread) temperatures (°C) — left/middle/right across tread.
+	// iRacing's carcass-temp channels (*tempCL/CM/CR) freeze at a stale value
+	// for the whole run on some cars and only update once at session end, so
+	// surface temp (*tempL/M/R) is used instead — it updates every sample.
+	LFtempL, LFtempM, LFtempR float32
+	RFtempL, RFtempM, RFtempR float32
+	LRtempL, LRtempM, LRtempR float32
+	RRtempL, RRtempM, RRtempR float32
 
 	// Tyre wear (0–1, 1 = new)
 	LFwearL, LFwearM, LFwearR float32
@@ -577,19 +580,19 @@ func extractSample(s ibt.Sample) SampleData {
 	sd.LRspeed, _ = s.Float32("LRspeed")
 	sd.RRspeed, _ = s.Float32("RRspeed")
 
-	// Tyre carcass temperatures
-	sd.LFtempCL, _ = s.Float32("LFtempCL")
-	sd.LFtempCM, _ = s.Float32("LFtempCM")
-	sd.LFtempCR, _ = s.Float32("LFtempCR")
-	sd.RFtempCL, _ = s.Float32("RFtempCL")
-	sd.RFtempCM, _ = s.Float32("RFtempCM")
-	sd.RFtempCR, _ = s.Float32("RFtempCR")
-	sd.LRtempCL, _ = s.Float32("LRtempCL")
-	sd.LRtempCM, _ = s.Float32("LRtempCM")
-	sd.LRtempCR, _ = s.Float32("LRtempCR")
-	sd.RRtempCL, _ = s.Float32("RRtempCL")
-	sd.RRtempCM, _ = s.Float32("RRtempCM")
-	sd.RRtempCR, _ = s.Float32("RRtempCR")
+	// Tyre surface temperatures
+	sd.LFtempL, _ = s.Float32("LFtempL")
+	sd.LFtempM, _ = s.Float32("LFtempM")
+	sd.LFtempR, _ = s.Float32("LFtempR")
+	sd.RFtempL, _ = s.Float32("RFtempL")
+	sd.RFtempM, _ = s.Float32("RFtempM")
+	sd.RFtempR, _ = s.Float32("RFtempR")
+	sd.LRtempL, _ = s.Float32("LRtempL")
+	sd.LRtempM, _ = s.Float32("LRtempM")
+	sd.LRtempR, _ = s.Float32("LRtempR")
+	sd.RRtempL, _ = s.Float32("RRtempL")
+	sd.RRtempM, _ = s.Float32("RRtempM")
+	sd.RRtempR, _ = s.Float32("RRtempR")
 
 	// Tyre wear
 	sd.LFwearL, _ = s.Float32("LFwearL")

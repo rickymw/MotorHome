@@ -2,11 +2,15 @@ package analysis
 
 // CornerTyres holds tyre metrics for one wheel corner.
 // Inner/Outer are relative to the car (inner = toward centre, outer = away).
-// iRacing's CL/CM/CR (left/middle/right tread bands) are mapped accordingly:
-// left-side tyres (LF, LR): CL→Outer, CR→Inner;
-// right-side tyres (RF, RR): CL→Inner, CR→Outer.
+// iRacing's tempL/tempM/tempR (left/middle/right tread bands) are mapped accordingly:
+// left-side tyres (LF, LR): tempL→Outer, tempR→Inner;
+// right-side tyres (RF, RR): tempL→Inner, tempR→Outer.
+// Surface (tread) temperature is used rather than iRacing's carcass-temp channels
+// (*tempCL/CM/CR), which were found to freeze at a stale cold value for an entire
+// session on some cars and only update once at session end — useless for a
+// per-lap average. Surface temp updates every sample and tracks real driving load.
 type CornerTyres struct {
-	// Average carcass temperatures over the lap (°C): CL, CM, CR tread bands.
+	// Average surface (tread) temperatures over the lap (°C): left/mid/right tread bands.
 	TempInner, TempMid, TempOuter float32
 
 	// End-of-lap wear per tread band (0.0–1.0; 1.0 = new). Subtract from 1.0 for % worn.
@@ -42,18 +46,18 @@ func ComputeTyreSummary(lap *Lap) TyreSummary {
 	var sumBrakeBias float64
 
 	for _, s := range lap.Samples {
-		sumLFtempL += float64(s.LFtempCL)
-		sumLFtempM += float64(s.LFtempCM)
-		sumLFtempR += float64(s.LFtempCR)
-		sumRFtempL += float64(s.RFtempCL)
-		sumRFtempM += float64(s.RFtempCM)
-		sumRFtempR += float64(s.RFtempCR)
-		sumLRtempL += float64(s.LRtempCL)
-		sumLRtempM += float64(s.LRtempCM)
-		sumLRtempR += float64(s.LRtempCR)
-		sumRRtempL += float64(s.RRtempCL)
-		sumRRtempM += float64(s.RRtempCM)
-		sumRRtempR += float64(s.RRtempCR)
+		sumLFtempL += float64(s.LFtempL)
+		sumLFtempM += float64(s.LFtempM)
+		sumLFtempR += float64(s.LFtempR)
+		sumRFtempL += float64(s.RFtempL)
+		sumRFtempM += float64(s.RFtempM)
+		sumRFtempR += float64(s.RFtempR)
+		sumLRtempL += float64(s.LRtempL)
+		sumLRtempM += float64(s.LRtempM)
+		sumLRtempR += float64(s.LRtempR)
+		sumRRtempL += float64(s.RRtempL)
+		sumRRtempM += float64(s.RRtempM)
+		sumRRtempR += float64(s.RRtempR)
 
 		sumLFpress += float64(s.LFpressure)
 		sumRFpress += float64(s.RFpressure)
@@ -66,41 +70,41 @@ func ComputeTyreSummary(lap *Lap) TyreSummary {
 	fn := float64(n)
 	last := lap.Samples[n-1]
 
-	// iRacing CL/CM/CR = left/middle/right across the tread width.
-	// For left-side tyres (LF, LR): CL = outer, CR = inner.
-	// For right-side tyres (RF, RR): CL = inner, CR = outer.
+	// iRacing tempL/tempM/tempR = left/middle/right across the tread width.
+	// For left-side tyres (LF, LR): tempL = outer, tempR = inner.
+	// For right-side tyres (RF, RR): tempL = inner, tempR = outer.
 	return TyreSummary{
 		LF: CornerTyres{
-			TempOuter: float32(sumLFtempL / fn), // CL = outer for left-side
+			TempOuter: float32(sumLFtempL / fn), // tempL = outer for left-side
 			TempMid:   float32(sumLFtempM / fn),
-			TempInner: float32(sumLFtempR / fn), // CR = inner for left-side
+			TempInner: float32(sumLFtempR / fn), // tempR = inner for left-side
 			WearOuter: last.LFwearL,
 			WearMid:   last.LFwearM,
 			WearInner: last.LFwearR,
 			PressureKPa: float32(sumLFpress / fn),
 		},
 		RF: CornerTyres{
-			TempInner: float32(sumRFtempL / fn), // CL = inner for right-side
+			TempInner: float32(sumRFtempL / fn), // tempL = inner for right-side
 			TempMid:   float32(sumRFtempM / fn),
-			TempOuter: float32(sumRFtempR / fn), // CR = outer for right-side
+			TempOuter: float32(sumRFtempR / fn), // tempR = outer for right-side
 			WearInner: last.RFwearL,
 			WearMid:   last.RFwearM,
 			WearOuter: last.RFwearR,
 			PressureKPa: float32(sumRFpress / fn),
 		},
 		LR: CornerTyres{
-			TempOuter: float32(sumLRtempL / fn), // CL = outer for left-side
+			TempOuter: float32(sumLRtempL / fn), // tempL = outer for left-side
 			TempMid:   float32(sumLRtempM / fn),
-			TempInner: float32(sumLRtempR / fn), // CR = inner for left-side
+			TempInner: float32(sumLRtempR / fn), // tempR = inner for left-side
 			WearOuter: last.LRwearL,
 			WearMid:   last.LRwearM,
 			WearInner: last.LRwearR,
 			PressureKPa: float32(sumLRpress / fn),
 		},
 		RR: CornerTyres{
-			TempInner: float32(sumRRtempL / fn), // CL = inner for right-side
+			TempInner: float32(sumRRtempL / fn), // tempL = inner for right-side
 			TempMid:   float32(sumRRtempM / fn),
-			TempOuter: float32(sumRRtempR / fn), // CR = outer for right-side
+			TempOuter: float32(sumRRtempR / fn), // tempR = outer for right-side
 			WearInner: last.RRwearL,
 			WearMid:   last.RRwearM,
 			WearOuter: last.RRwearR,

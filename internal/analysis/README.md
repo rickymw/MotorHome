@@ -62,7 +62,7 @@ Corners with peak steering < 5° get a single "full" phase. `countSteeringCorrec
 | `DumpConfig` | Controls CSV dump: downsample rate (default 3 = 20Hz) and context samples (default 60 = 1s). |
 | `Zone` | Per-zone stats for the legacy 20-zone split. |
 | `SessionMeta` | Car, track, and driver name parsed from session YAML. |
-| `TyreSummary` / `CornerTyres` | Per-corner avg carcass temps (inner/outer mapped from iRacing CL/CR accounting for left- vs right-side), end-of-lap wear, avg hot pressure, and brake bias for one lap. |
+| `TyreSummary` / `CornerTyres` | Per-corner avg surface (tread) temps (inner/outer mapped from iRacing tempL/tempR accounting for left- vs right-side), end-of-lap wear, avg hot pressure, and brake bias for one lap. Uses surface temp rather than iRacing's carcass-temp channels, which freeze at a stale value for entire sessions on some cars. |
 
 ### Key functions
 
