@@ -200,6 +200,35 @@ func TestComputePhases_PhaseStats(t *testing.T) {
 	}
 }
 
+func TestComputePhases_PeakSpeed(t *testing.T) {
+	segs := []trackmap.Segment{
+		{Name: "S1", Kind: trackmap.KindStraight, EntryPct: 0.0, ExitPct: 1.0},
+	}
+
+	n := 100
+	samples := make([]SampleData, n)
+	for i := range samples {
+		pct := float32(i) / float32(n)
+		// Speed ramps up then drops off before the segment ends, so the peak
+		// is neither the first nor the last sample.
+		speed := float32(30)
+		if i == n/2 {
+			speed = 80
+		}
+		samples[i] = SampleData{LapDistPct: pct, SessionTime: float64(i) / 60, Speed: speed}
+	}
+	lap := makeFlyingLap(samples)
+	phases := ComputePhases(&lap, segs, nil)
+
+	if len(phases) != 1 {
+		t.Fatalf("len(phases) = %d, want 1", len(phases))
+	}
+	wantPeak := float32(80 * ms2kmh)
+	if math.Abs(float64(phases[0].PeakSpeedKPH-wantPeak)) > 0.01 {
+		t.Errorf("PeakSpeedKPH = %.2f, want %.2f", phases[0].PeakSpeedKPH, wantPeak)
+	}
+}
+
 func TestCountSteeringCorrections_NoCorrections(t *testing.T) {
 	// Smooth ramp: no direction reversals.
 	samples := make([]SampleData, 100)

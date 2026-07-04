@@ -45,11 +45,12 @@ type Phase struct {
 
 	SpeedEntryKPH float32 // speed of first sample in phase (km/h)
 	SpeedExitKPH  float32 // speed of last sample in phase (km/h)
+	PeakSpeedKPH  float32 // max speed sample in phase (km/h)
 
 	BrakePct     float32 // % of samples with brake > 2%
 	PeakBrakePct float32 // max brake pressure (0–100%)
-	ThrottlePct float32 // % of samples at full throttle (> 95%)
-	LatGAvg     float32 // average abs lateral G
+	ThrottlePct  float32 // % of samples at full throttle (> 95%)
+	LatGAvg      float32 // average abs lateral G
 
 	PeakSteerDeg float32 // max |SteeringAngle| in the phase (degrees)
 	Corrections  int     // steering direction reversals above threshold
@@ -191,6 +192,11 @@ func computePhaseStats(segIdx int, segName string, kind PhaseKind, samples []Sam
 	var brakeOnCount, thrFullCount int
 
 	for _, s := range samples {
+		// Peak speed.
+		if spd := s.Speed * ms2kmh; spd > p.PeakSpeedKPH {
+			p.PeakSpeedKPH = spd
+		}
+
 		// Brake.
 		if s.Brake > brakeOnThreshold {
 			brakeOnCount++

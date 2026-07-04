@@ -123,6 +123,10 @@ vs PB:
  T1   | entry |    -4→   +2 |    +2 |    -1 |   +0 | -0.05 |    +1 |   +0 |   +3 |   +0 | +0.05s
  T1   | mid   |    +1→   -1 |    +0 |    +0 |   -3 | -0.08 |    +0 |   +0 |   +0 |   +0 | +0.10s
  T1   | exit  |    -2→   -3 |    +0 |    +0 |   -5 | +0.02 |    +0 |   +0 |   +0 |   +1 | +0.00s
+
+Corner Exit -> Straight Peak:
+  Corner  ExitSpd  Straight  PeakSpd
+  T1       112.0   S2         198.4
 ```
 
 ### Segment table columns

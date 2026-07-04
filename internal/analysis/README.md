@@ -41,6 +41,10 @@ Out/in lap classification uses entry/exit speed: < 5 m/s at the first sample = o
 
 Corners with peak steering < 5° get a single "full" phase. `countSteeringCorrections` detects rapid sign changes in steering rate within each phase.
 
+### Exit-speed impact (`exitimpact.go`)
+
+`ComputeExitImpact` pairs each corner/chicane with the straight segment immediately following it (wrapping from the last segment to the first, since the S/F straight typically follows the final corner) and reports the corner's exit speed (`Phase.SpeedExitKPH` of its last phase) alongside the peak speed reached on that straight (`Phase.PeakSpeedKPH`) — a direct measure of whether a slow exit cost speed down the next straight. Pairs with no computed phases on either side (e.g. a segment straddling a truncated final lap) are skipped.
+
 ### Segment CSV dump (`dump.go`)
 
 `DumpSegmentCSV` writes a downsampled CSV of telemetry for a single segment, suitable for AI analysis. Output is 20Hz by default (every 3rd sample) with 1 second of context before/after the segment. Columns: `Dist%,Time,Speed,Throttle,Brake,Steer,Gear,LatG,LongG,ABS,Coast`. A typical corner produces ~200 rows — compact enough for direct AI consumption.
@@ -58,7 +62,8 @@ Corners with peak steering < 5° get a single "full" phase. `countSteeringCorrec
 | `SampleData` | ~60 telemetry channels per sample: timing, driver inputs (raw & processed), dynamics, driver aids, wheel speeds, tyre temps/wear/pressure, brake line pressures, fuel, steering torque. |
 | `Lap` | One lap: number, time (`LapLastLapTime` preferred; SessionTime diff fallback), kind, `OfficialLapTime`, `IsPartialStart` and `IsCut` flags, and `[]SampleData`. |
 | `LapKind` | `KindFlying`, `KindOutLap`, `KindInLap`, `KindOutInLap`. |
-| `Phase` | Per-phase stats: entry/exit speed, brake%, peak brake, throttle%, avg lat G, peak steering angle, steering corrections, ABS, lockup/wheelspin, coast. |
+| `Phase` | Per-phase stats: entry/exit/peak speed, brake%, peak brake, throttle%, avg lat G, peak steering angle, steering corrections, ABS, lockup/wheelspin, coast. |
+| `ExitImpact` | Corner exit speed paired with the peak speed reached on the following straight, for one lap. |
 | `DumpConfig` | Controls CSV dump: downsample rate (default 3 = 20Hz) and context samples (default 60 = 1s). |
 | `Zone` | Per-zone stats for the legacy 20-zone split. |
 | `SessionMeta` | Car, track, and driver name parsed from session YAML. |
@@ -76,6 +81,7 @@ weather := analysis.ParseWeather(yaml)
 
 phases := analysis.ComputePhases(&lap, segments)
 entries := analysis.ComputeBrakeEntries(laps, segments)
+exitImpacts := analysis.ComputeExitImpact(segments, phases)
 
 // Dump a corner's telemetry to CSV for AI analysis.
 segIdx := analysis.ResolveSegmentName(segments, "T3")

@@ -580,6 +580,7 @@ func analyzeSingleLap(laps []analysis.Lap, lapNum int, segs []trackmap.Segment, 
 		if len(pbPhases) > 0 {
 			printPBComparison(phases, pbPhases)
 		}
+		printExitImpact(analysis.ComputeExitImpact(segs, phases))
 	} else {
 		printZoneTable(lap, analysis.ZoneStats(lap))
 	}
@@ -803,6 +804,35 @@ func printPhaseTable(lap *analysis.Lap, phases []analysis.Phase) {
 			p.LatGAvg,
 			p.PeakSteerDeg, p.Corrections,
 			p.ABSCount, p.LockupSamples, p.WheelspinSamples, coastSecs)
+	}
+	fmt.Println()
+}
+
+// printExitImpact prints each corner's exit speed alongside the peak speed
+// reached on the straight that follows it — surfaces whether a slow exit is
+// costing speed (and time) down the next straight.
+func printExitImpact(impacts []analysis.ExitImpact) {
+	if len(impacts) == 0 {
+		return
+	}
+
+	cornerW := 6   // minimum "Corner"
+	straightW := 8 // minimum "Straight"
+	for _, imp := range impacts {
+		if len(imp.CornerName) > cornerW {
+			cornerW = len(imp.CornerName)
+		}
+		if len(imp.StraightName) > straightW {
+			straightW = len(imp.StraightName)
+		}
+	}
+
+	fmt.Println("Corner Exit -> Straight Peak:")
+	fmt.Printf("  %-*s  %7s  %-*s  %7s\n", cornerW, "Corner", "ExitSpd", straightW, "Straight", "PeakSpd")
+	for _, imp := range impacts {
+		fmt.Printf("  %-*s  %6.1f   %-*s  %6.1f\n",
+			cornerW, imp.CornerName, imp.CornerExitSpeedKPH,
+			straightW, imp.StraightName, imp.StraightPeakSpeedKPH)
 	}
 	fmt.Println()
 }
@@ -1097,4 +1127,3 @@ func nthLatestIbtFile(dir string, n int) (string, error) {
 	}
 	return files[n-1].path, nil
 }
-
