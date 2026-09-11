@@ -26,11 +26,13 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rickymw/MotorHome/internal/camera"
 	"github.com/rickymw/MotorHome/internal/config"
 	"github.com/rickymw/MotorHome/internal/launcher"
+	"github.com/rickymw/MotorHome/internal/shaker"
 	"github.com/rickymw/MotorHome/internal/usbdev"
 )
 
@@ -57,6 +59,19 @@ type USBProvider interface {
 // CameraProvider restarts the OS camera pipeline. Mirrors camera.Restarter.
 type CameraProvider interface {
 	Restart(progress func(string)) ([]camera.ServiceResult, error)
+}
+
+// ShakerProvider plays test tones at a tactile transducer. Mirrors
+// shaker.Player.
+//
+// This is the whole interface, not the read half, because unlike USB changes it
+// needs no elevated token — and because Stop has to be callable while Play is
+// blocked, which rules out running it through RunSubcommand: a browser has no
+// way to send Ctrl-C to a child process.
+type ShakerProvider interface {
+	Devices() ([]shaker.Device, error)
+	Play(deviceID int, pcm []byte, f shaker.Format) error
+	Stop()
 }
 
 // LiveProvider returns a snapshot of the iRacing session. The gap and position
@@ -90,6 +105,7 @@ type Deps struct {
 	USB    USBProvider
 	Camera CameraProvider
 	Live   LiveProvider
+	Shaker ShakerProvider
 
 	// RunSubcommand re-runs this executable with the given arguments and
 	// returns its combined output. Used for the two operations that must not
@@ -112,6 +128,17 @@ type Server struct {
 	// cameraMu does the same for the camera restart, which stops and starts
 	// machine-wide services and can block for ~30s.
 	cameraMu sync.Mutex
+
+	// shakerMu serialises transducer tests; two overlapping ramps would
+	// interleave buffers on one device. It is TryLock-ed rather than waited on,
+	// because a queued ramp would start the seat moving some time after the
+	// click that asked for it.
+	shakerMu sync.Mutex
+
+	// shakerAbort is set by the stop handler and read between steps. It is
+	// separate from shakerMu precisely so that stopping does not have to wait
+	// for the run it is stopping.
+	shakerAbort atomic.Bool
 }
 
 func New(deps Deps) *Server { return &Server{deps: deps} }
@@ -136,6 +163,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/usb", s.handleUSBSet)
 	mux.HandleFunc("GET /api/usb/scan", s.handleUSBScan)
 	mux.HandleFunc("POST /api/camera", s.handleCamera)
+
+	mux.HandleFunc("GET /api/shaker", s.handleShakerStatus)
+	mux.HandleFunc("POST /api/shaker", s.handleShakerRun)
+	mux.HandleFunc("POST /api/shaker/stop", s.handleShakerStop)
 
 	mux.HandleFunc("GET /api/live", s.handleLive)
 	mux.HandleFunc("GET /api/live/stream", s.handleLiveStream)

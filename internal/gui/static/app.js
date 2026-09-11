@@ -957,3 +957,94 @@ $("#btn-save-settings").addEventListener("click", (ev) => withBusy(ev.target, as
 
 refreshStatus();
 loadUSB();
+refreshShaker();
+
+/* ─────────────────────────── Transducer ─────────────────────────── */
+
+// The Test button is gated on a target being found, so an absent or ambiguous
+// device disables the card rather than letting a click come back as an error.
+async function refreshShaker() {
+  const summary = $("#shaker-target");
+  const test = $("#btn-shaker-test");
+  try {
+    const data = await api("/api/shaker");
+    if (data.targetName) {
+      summary.textContent = data.targetName;
+      summary.title = "";
+      test.disabled = false;
+    } else {
+      summary.textContent = "not found";
+      // The full shaker-package message names every output device, which is
+      // what someone whose amp is off or unplugged actually needs to see.
+      summary.title = data.problem || "";
+      test.disabled = true;
+    }
+  } catch (e) {
+    summary.textContent = e.status === 501 ? "unavailable" : "error";
+    summary.title = e.message;
+    test.disabled = true;
+  }
+}
+
+$("#btn-shaker-test").addEventListener("click", async () => {
+  const max = parseFloat($("#shaker-max").value);
+  const out = $("#shaker-output");
+  const test = $("#btn-shaker-test");
+  const stop = $("#btn-shaker-stop");
+
+  // Anything above a quarter of full scale is a real shove, and this is a
+  // button rather than a typed command — so it asks once.
+  if (max > 0.25 && !confirm(
+    `Ramp the transducer up to ${Math.round(max * 100)}% of full scale?\n\n` +
+    `Stop immediately if you smell burning or the amplifier case is hot.`)) {
+    return;
+  }
+
+  test.disabled = true;
+  stop.disabled = false;
+  out.hidden = false;
+  out.textContent = "Ramping up from 2% — press Stop at the first sign of anything wrong…";
+
+  try {
+    const data = await api("/api/shaker", {
+      method: "POST",
+      body: JSON.stringify({ maxLevel: max }),
+    });
+    const lines = (data.steps || []).slice(0, data.played).map(
+      (s) => `  ${formatPct(s.level).padStart(6)}  ${s.freq.toFixed(1)} Hz  ${s.secs.toFixed(1)}s`);
+    if (data.aborted) {
+      lines.push(`\nStopped after ${data.played} of ${(data.steps || []).length} steps. Output cut.`);
+      toast("Transducer test stopped.", "ok");
+    } else {
+      lines.push(`\nDone — ${data.played} steps played to ${data.device}.`);
+      lines.push("Windows accepted and played every buffer, so the path from PC to");
+      lines.push("amplifier is working. Whether the transducer actually moved is the");
+      lines.push("half only you can confirm, and none of it says the amplifier is");
+      lines.push("electrically sound.");
+      toast("Transducer test complete.", "ok");
+    }
+    out.textContent = lines.join("\n");
+  } catch (e) {
+    out.textContent = e.message;
+    toast(e.message, "error");
+  } finally {
+    test.disabled = false;
+    stop.disabled = true;
+  }
+});
+
+// Stop is its own request so it is serviceable while the run is holding the
+// server's lock — a stop that queued behind the thing it stops would be no
+// stop at all.
+$("#btn-shaker-stop").addEventListener("click", async () => {
+  try {
+    await api("/api/shaker/stop", { method: "POST" });
+  } catch (e) {
+    toast(e.message, "error");
+  }
+});
+
+// formatPct renders an amplitude the way the CLI does, without trailing zeros.
+function formatPct(level) {
+  return `${parseFloat((level * 100).toFixed(2))}%`;
+}

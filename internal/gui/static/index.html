@@ -72,6 +72,35 @@
       <pre class="output" id="camera-output" hidden></pre>
     </div>
 
+    <div class="card">
+      <div class="card-head">
+        <h2>Transducer</h2>
+        <span class="summary" id="shaker-target"></span>
+      </div>
+      <p class="muted small">
+        Ramps a 40&nbsp;Hz tone from near-silence so you can check a ButtKicker
+        without launching a sim. Starts at 2% of full scale and steps up.
+      </p>
+      <div class="actions">
+        <label class="inline">Ramp to
+          <select id="shaker-max">
+            <option value="0.05">5%</option>
+            <option value="0.1" selected>10%</option>
+            <option value="0.25">25%</option>
+            <option value="0.5">50%</option>
+          </select>
+        </label>
+        <button class="btn primary" id="btn-shaker-test">Test</button>
+        <button class="btn danger" id="btn-shaker-stop" disabled>Stop</button>
+      </div>
+      <p class="muted small">
+        Verifies the path from PC to amplifier only — not that the transducer
+        moved, and not that the amplifier is electrically sound. Stop at once if
+        you smell burning or the case is hot.
+      </p>
+      <pre class="output" id="shaker-output" hidden></pre>
+    </div>
+
   </div>
 </section>
 

@@ -6,17 +6,19 @@ import (
 	"github.com/rickymw/MotorHome/internal/camera"
 	"github.com/rickymw/MotorHome/internal/gui"
 	"github.com/rickymw/MotorHome/internal/iracing"
+	"github.com/rickymw/MotorHome/internal/shaker"
 	"github.com/rickymw/MotorHome/internal/usbdev"
 )
 
-// attachPlatformDeps fills in the three providers that only exist on Windows:
-// iRacing shared memory, SetupAPI device enumeration, and the service control
-// manager. internal/gui stays free of all three so it compiles and tests on any
-// OS; this file is the only place they meet.
+// attachPlatformDeps fills in the providers that only exist on Windows:
+// iRacing shared memory, SetupAPI device enumeration, the service control
+// manager, and WinMM audio output. internal/gui stays free of all of them so it
+// compiles and tests on any OS; this file is the only place they meet.
 func attachPlatformDeps(deps *gui.Deps) {
 	deps.Live = liveProvider{}
 	deps.USB = usbProvider{}
 	deps.Camera = camera.NewRestarter()
+	deps.Shaker = shaker.NewPlayer()
 }
 
 // usbProvider builds a controller per call rather than holding one.

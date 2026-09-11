@@ -482,8 +482,22 @@ Why this matters: iRacing's track-limits enforcement is lenient — a driver who
 ### gui subcommand flow (`cmd/motorhome/gui.go`)
 
 Serves the web interface on `127.0.0.1` and opens a browser. Five panels: rig
-control (apps + USB + camera), settings, session analysis, live gaps, personal
-bests. Full detail in [internal/gui/README.md](internal/gui/README.md).
+control (apps + USB + camera + transducer), settings, session analysis, live
+gaps, personal bests. Full detail in [internal/gui/README.md](internal/gui/README.md).
+
+**The transducer panel runs in-process, unlike the USB one.** `usb on|off` goes
+through `RunSubcommand` because it needs an elevated token; the shaker does not,
+and it has the opposite requirement — a page that starts the seat moving must
+have a Stop that works *while* it is moving, and a browser cannot send Ctrl-C to
+a child process. So `ShakerProvider` is the whole `shaker.Player` interface and
+playback happens in the server. `handleShakerRun` holds `shakerMu` for the
+length of the ramp and `handleShakerStop` deliberately does not take that lock;
+they communicate through `shakerAbort`, which the run checks between steps.
+`shakerMu` is also `TryLock`-ed rather than queued — a queued ramp would start
+the seat moving seconds after the click that asked for it. The 0.5 level ceiling
+is enforced in the handler (`guiMaxLevel`), not just in the page's menu: a
+browser control is easier to hit by accident than a typed command, and the
+request body is the only thing between a stray click and full-scale output.
 
 **The mark ships as two SVGs, not one.** `static/logo.svg` (topbar) hard-codes a
 light tyre because the app chrome is deliberately dark-only; `static/favicon.svg`
@@ -622,6 +636,7 @@ All live next to the binary in `G:\RACING\SimAppLauncher\`:
 - `gui` serves one user on one machine by design (loopback only, no auth). Reaching it from a phone or tablet would need a bind-address change *and* something in front of it — the guard is not a login
 - `gui` has no `coach` panel. The coach brief is written to be pasted into an AI assistant, and a browser is not where that happens; `motorhome coach` remains the way to get one
 - A `gui` analysis holds the request for as long as the analysis takes (a few seconds on a 45 MB `.ibt`) with only a spinner. There is no progress reporting — the analyze subcommand has no progress to report
+- The `gui` transducer panel holds its HTTP request for the whole ramp and reports only at the end, so the browser shows "ramping up" rather than the current step. Per-step progress would need SSE like the live panel; the ramp is a few seconds, and the Stop button works throughout regardless
 - `gui` state changes have no undo. Disabling the wrong USB device or removing an app from the settings form is recoverable, but only by doing the opposite
 - The settings form does not browse the filesystem — paths are typed. A file picker would need either an upload control (wrong: it copies the file) or a server-side directory browser (a filesystem-listing endpoint on a machine-local server, which is more surface than the feature is worth)
 

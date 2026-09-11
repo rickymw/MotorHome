@@ -26,6 +26,7 @@ is how this rig is often used.
 | `sessions.go` | `/api/sessions` listing, `/api/analyze` proxy |
 | `pbview.go` | `/api/pb` list and detail |
 | `devices.go` | `/api/usb` list, set and scan; `/api/camera` |
+| `shaker.go` | `/api/shaker` status, run and stop |
 | `live.go` | `/api/live` snapshot, `/api/live/stream` SSE |
 | `static/` | `index.html`, `app.js`, `style.css`, embedded via `go:embed` |
 
@@ -94,6 +95,18 @@ rewrite `trackmap.json` and `pb.json`, and two racing would interleave those
 writes. `cameraMu` does the same for the camera restart, which stops and starts
 machine-wide services. Both queue rather than reject: a queued click is less
 surprising than a refused one.
+
+`shakerMu` is the exception that proves the rule: it is `TryLock`-ed, and a
+second transducer test is refused with a 409 rather than queued. Queueing is
+fine for work that produces a table; it is the wrong behaviour for work that
+makes the seat move, because the ramp would start some seconds after the click
+that asked for it, with nobody expecting it.
+
+`shakerMu` is the exception that proves the rule: it is `TryLock`-ed, and a
+second test is refused with a 409 rather than queued. Queueing is fine for work
+that produces a table; it is the wrong behaviour for work that makes the seat
+move, because the ramp would start some seconds after the click that asked for
+it and with nobody expecting it.
 
 ## The config is re-read every request
 
@@ -199,3 +212,38 @@ list replaces them rather than extending them.
 because a controller built once at boot would keep matching against whatever the
 server started with, and a device added through the picker would not appear until
 a restart — exactly the friction the picker removes.
+
+## The transducer panel runs in-process
+
+`usb on|off` goes out through `RunSubcommand` because it needs an elevated
+token. The transducer test does not, and it has the opposite requirement: a page
+that starts the seat moving must have a Stop that works *while* it is moving,
+and a browser has no way to send Ctrl-C to a child process. So `ShakerProvider`
+is the whole `shaker.Player` interface rather than a read half, and playback
+happens here where the stop handler can reach the same player.
+
+That shapes the concurrency. `handleShakerRun` holds `shakerMu` for the length
+of the ramp, so `handleShakerStop` deliberately does **not** take that lock — a
+stop queued behind the run it is stopping would be no stop at all. The two
+communicate through `shakerAbort`, which the run checks between steps: `Stop`
+silences the buffer that is currently sounding, and the flag is what keeps the
+next one from starting straight after it.
+
+The request is held for the whole ramp (a few seconds). That is fine here for
+the same reason it is fine for `analyze` and `camera` — the server sets only
+`ReadHeaderTimeout`, never a write timeout, precisely so legitimately slow work
+is not cut off.
+
+### The level cap is enforced server-side
+
+The page offers 5/10/25/50% and asks for confirmation above 25%, but
+`guiMaxLevel` rejects anything over 0.5 in the handler. A browser control is
+easier to hit by accident than a typed command, and the request body is the only
+thing between a stray click and full-scale output into hardware bolted to a
+seat — so the ceiling lives where it cannot be bypassed by editing the page.
+
+An unmatched device is reported as a 200 with an empty `targetName` and the
+`shaker` package's own problem text, not as an error: a transducer that is
+switched off is a normal state, and the card greys itself out rather than
+showing a failure. The problem text names every output device, which is what
+someone whose amplifier is unplugged actually needs to see.

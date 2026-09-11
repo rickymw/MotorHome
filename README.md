@@ -18,7 +18,7 @@ A Windows CLI tool that launches sim racing apps in sequence, analyses iRacing `
 - **PB store management** — list, inspect, prune, and diff the setup you're running now against the setup that set your PB
 - **JSON output** — the whole analysis as a structured document for AI coaching or any other downstream tool
 - **Transducer test** — `motorhome shaker test` ramps a 40 Hz tone from near-silence at a ButtKicker, so you can check it works without launching a sim, and abort the instant anything seems wrong
-- **Web interface** — `motorhome gui` serves a local dashboard covering the rig controls, the settings file, session analysis, live gaps and the PB store. No dependencies, no build step, loopback only
+- **Web interface** — `motorhome gui` serves a local dashboard covering the rig controls (apps, USB devices, camera, transducer), the settings file, session analysis, live gaps and the PB store. No dependencies, no build step, loopback only
 
 ## Requirements
 
@@ -586,6 +586,8 @@ use it at the first sign of anything wrong, including a smell.
 It starts that quietly because the first test after a transducer has sat unused is also when a fault shows up. Ctrl-C cuts the output immediately rather than letting the process die with a buffer still queued. Every tone fades in and out — a sine starting at full amplitude is a DC step, which in a transducer bolted to a seat is a mechanical slam.
 
 > **What a clean run proves, and what it doesn't.** It proves Windows accepted the format, opened the device and played every buffer — the path from PC to amplifier works. It cannot tell whether the transducer actually moved, and **nothing in software can tell you an amplifier is electrically sound.** If you smell burning, see a bulged capacitor, or the case gets hot, stop and get the amplifier looked at. The level numbers are also relative: what 20% does depends entirely on where the amplifier's gain knob is set.
+
+The same test is in the web interface under **Rig -> Transducer**, with a level menu defaulting to 10%, a Stop button that cuts output mid-ramp, and a confirmation above 25%. The 50% ceiling is enforced by the server, not just the page.
 
 See [internal/shaker/README.md](internal/shaker/README.md) for the envelope and device-matching detail.
 
