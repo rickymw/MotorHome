@@ -56,12 +56,25 @@ used to probe hardware that is suspect.
 ## What a clean run does and does not prove
 
 It proves Windows accepted the format, opened the device and played every
-buffer: the path from PC to amplifier works. It cannot prove the transducer
-moved, and it says nothing about whether the amplifier is electrically sound —
-a burning smell, a hot case or a failing supply are all invisible from here. The
-command's closing lines say so explicitly, and a test asserts that wording,
-because reporting a clean run as "working" is the wrong thing to tell someone
-testing hardware they already suspect.
+buffer: the path from PC to the audio interface works. It cannot prove the
+transducer moved, and it says nothing about whether the amplifier is
+electrically sound — a burning smell, a hot case or a failing supply are all
+invisible from here. The command's closing lines say so explicitly, and a test
+asserts that wording, because reporting a clean run as "working" is the wrong
+thing to tell someone testing hardware they already suspect.
+
+**This is not a theoretical caveat — it happened on the rig this was written
+for.** The ButtKicker had smelled of burning electronics, and afterwards
+produced no output at all. Throughout, the `KT USB Audio` device kept
+enumerating as completely healthy (composite device, audio and HID interfaces,
+every node `OK`) and `shaker test` kept reporting clean runs. The USB audio
+interface and the power amplifier are separate sections of the unit, and only
+the first is visible to software — so a green result from this command is
+evidence about the PC, not about the hardware bolted to the seat.
+
+Do not be tempted to infer amplifier health from a successful enumeration or a
+successful play. Nothing reachable from here distinguishes a working amplifier
+from a dead one.
 
 ## Format
 
