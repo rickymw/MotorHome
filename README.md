@@ -468,7 +468,10 @@ Sim racing USB devices
   handbrake   enabled        MOZA HBP Handbrake
   haptic      enabled        SIMAGIC P2000 Haptic
   pedals      enabled        Heusinkveld Sim Pedals Sprint
-  wheelbase   not connected  SIMAGIC Alpha Series Wheelbase
+  rim         enabled        SIMAGIC Neo X
+  wheelbase   enabled        SIMAGIC Alpha EVO Pro
+
+  Built-in device list. Add your own with `motorhome gui` -> Rig -> Scan.
 ```
 
 Targets can be an alias, any unambiguous substring of a device name (`heusink` works), or `all`. A target matching several devices is an error listing them rather than a guess — disabling the wrong device mid-session is cheap to undo but not cheap to *notice*, since the symptom is a control that silently stopped working.
@@ -477,7 +480,8 @@ Targets can be an alias, any unambiguous substring of a device name (`heusink` w
   [+] handbrake   MOZA HBP Handbrake               disabled
   [+] haptic      SIMAGIC P2000 Haptic             disabled
   [+] pedals      Heusinkveld Sim Pedals Sprint    disabled
-  [=] wheelbase   SIMAGIC Alpha Series Wheelbase   not connected
+  [+] rim         SIMAGIC Neo X                    disabled
+  [=] wheelbase   SIMAGIC Alpha EVO Pro            not connected
 
 A game that enumerated its controllers at startup may need restarting to notice.
 ```
@@ -491,6 +495,12 @@ A device already in the requested state reports `already disabled` rather than c
 The device list is yours, not hardcoded. The easiest way to add one is the GUI —
 **Rig → Scan for devices** lists everything plugged into the machine and fills in
 the IDs for you:
+
+> Take the IDs from a scan, not from Device Manager's leftovers. Windows keeps a
+> registry of every controller ever attached and never forgets one, so a name
+> you recognise there may belong to hardware you replaced years ago. An ID that
+> matches nothing looks exactly like a device that is unplugged — the row just
+> says `not connected` forever.
 
 ```powershell
 .\motorhome.exe gui

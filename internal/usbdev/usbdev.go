@@ -56,11 +56,21 @@ type Known struct {
 // its own. Entries are matched against the top-level USB device node, never an
 // interface node — see parseVIDPID.
 //
-// The wheelbase VID (0x0483) belongs to STMicroelectronics rather than SIMAGIC,
-// since the base uses an ST microcontroller and never overrode the default; the
-// PID is what actually pins it down.
+// Every ID here was read from a *live* enumeration (`usb scan`). That is not a
+// detail: the wheelbase entry was originally taken from the joystick registry
+// at HKLM\...\MediaProperties\PrivateProperties\Joystick\OEM, which lists every
+// device ever attached and never forgets one. It named a "SIMAGIC Alpha Series
+// Wheelbase" (0x0483/0x0522) and a "GT Neo" that had both been replaced, so the
+// shipped list described hardware this rig no longer had and the real base
+// reported `not connected` while plugged in and working. Do not source IDs from
+// that key — it cannot distinguish present hardware from a three-year-old
+// memory of it.
+//
+// The base and the rim are separate USB devices on separate hubs, not one
+// device behind another, so they are listed and toggled independently.
 var KnownDevices = []Known{
-	{Alias: "wheelbase", Name: "SIMAGIC Alpha Series Wheelbase", VID: 0x0483, PID: 0x0522},
+	{Alias: "wheelbase", Name: "SIMAGIC Alpha EVO Pro", VID: 0x3670, PID: 0x0501},
+	{Alias: "rim", Name: "SIMAGIC Neo X", VID: 0x3670, PID: 0x0808},
 	{Alias: "haptic", Name: "SIMAGIC P2000 Haptic", VID: 0x3670, PID: 0x0902},
 	{Alias: "pedals", Name: "Heusinkveld Sim Pedals Sprint", VID: 0x30B7, PID: 0x1001},
 	{Alias: "handbrake", Name: "MOZA HBP Handbrake", VID: 0x346E, PID: 0x001F},

@@ -21,14 +21,33 @@ So `KnownDevices` carries a curated name per vendor/product ID pair:
 
 | Alias | Device | VID | PID |
 |---|---|---|---|
-| `wheelbase` | SIMAGIC Alpha Series Wheelbase | `0x0483` | `0x0522` |
+| `wheelbase` | SIMAGIC Alpha EVO Pro | `0x3670` | `0x0501` |
+| `rim` | SIMAGIC Neo X | `0x3670` | `0x0808` |
 | `haptic` | SIMAGIC P2000 Haptic | `0x3670` | `0x0902` |
 | `pedals` | Heusinkveld Sim Pedals Sprint | `0x30B7` | `0x1001` |
 | `handbrake` | MOZA HBP Handbrake | `0x346E` | `0x001F` |
 
-The wheelbase VID belongs to STMicroelectronics rather than SIMAGIC — the base
-uses an ST microcontroller and never overrode the default — so the PID is what
-actually pins it down.
+The base and the rim are separate USB devices on separate hubs — the rim is not
+behind the base — so they enumerate and toggle independently.
+
+### Read IDs from a live enumeration, never from the joystick registry
+
+The wheelbase entry was originally `0x0483/0x0522`, "SIMAGIC Alpha Series
+Wheelbase", taken from
+`HKLM\SYSTEM\CurrentControlSet\Control\MediaProperties\PrivateProperties\Joystick\OEM`
+because the base happened to be unplugged when the list was written. That key
+lists every device **ever** attached and never forgets one: the ID it gave was a
+base this rig no longer has, and the same key still advertises a "GT Neo" rim
+that has likewise been replaced. The result was a wheelbase reporting
+`not connected` while plugged in and working — the failure mode is silent,
+because an ID that matches nothing is indistinguishable from a device that is
+genuinely unplugged.
+
+`usb scan` is the correct source, and exists partly for this reason: it walks
+live devnodes, so anything it lists is by construction something present.
+`TestKnownDevicesAreWellFormed` covers the structural half of the problem
+(duplicate aliases, duplicate hardware IDs); it cannot tell whether an ID
+corresponds to real hardware, which is why the provenance rule matters.
 
 That table is the **default**, not the list. `usbDevices` in the config supplies
 the real one and `ResolveKnown` falls back to the table above when it is empty.

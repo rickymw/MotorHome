@@ -90,12 +90,43 @@ func TestMatch(t *testing.T) {
 	}
 }
 
+// TestKnownDevicesAreWellFormed guards the shipped table itself. Matching is by
+// hardware ID, so a duplicated VID/PID pair makes one entry permanently
+// unreachable, and a duplicated alias makes one untargetable — neither shows up
+// as a failure anywhere else, they just quietly mean a device can never be
+// toggled. With four devices now sharing VID 0x3670, a copy-pasted PID is the
+// easy mistake to make here.
+func TestKnownDevicesAreWellFormed(t *testing.T) {
+	type id struct{ vid, pid uint16 }
+	aliases := map[string]bool{}
+	ids := map[id]string{}
+
+	for _, k := range KnownDevices {
+		if k.Alias == "" || k.Name == "" {
+			t.Errorf("entry %+v has an empty alias or name", k)
+		}
+		if strings.EqualFold(k.Alias, "all") {
+			t.Errorf("alias %q collides with the `all` target", k.Alias)
+		}
+		if aliases[k.Alias] {
+			t.Errorf("duplicate alias %q", k.Alias)
+		}
+		aliases[k.Alias] = true
+
+		key := id{k.VID, k.PID}
+		if prev, dup := ids[key]; dup {
+			t.Errorf("%q and %q share VID_%04X&PID_%04X — one can never match", prev, k.Alias, k.VID, k.PID)
+		}
+		ids[key] = k.Alias
+	}
+}
+
 func testDevices() []Device {
 	return []Device{
 		{Known: Known{Alias: "handbrake", Name: "MOZA HBP Handbrake"}, InstanceID: `USB\A`, State: StateEnabled},
 		{Known: Known{Alias: "haptic", Name: "SIMAGIC P2000 Haptic"}, InstanceID: `USB\B`, State: StateDisabled},
 		{Known: Known{Alias: "pedals", Name: "Heusinkveld Sim Pedals Sprint"}, InstanceID: `USB\C`, State: StateEnabled},
-		{Known: Known{Alias: "wheelbase", Name: "SIMAGIC Alpha Series Wheelbase"}, State: StateAbsent},
+		{Known: Known{Alias: "wheelbase", Name: "SIMAGIC Alpha EVO Pro"}, State: StateAbsent},
 	}
 }
 

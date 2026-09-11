@@ -54,7 +54,7 @@ func fakeUSBDevices() []usbdev.Device {
 		{Known: usbdev.Known{Alias: "handbrake", Name: "MOZA HBP Handbrake"}, InstanceID: `USB\A`, State: usbdev.StateEnabled},
 		{Known: usbdev.Known{Alias: "haptic", Name: "SIMAGIC P2000 Haptic"}, InstanceID: `USB\B`, State: usbdev.StateDisabled},
 		{Known: usbdev.Known{Alias: "pedals", Name: "Heusinkveld Sim Pedals Sprint"}, InstanceID: `USB\C`, State: usbdev.StateEnabled},
-		{Known: usbdev.Known{Alias: "wheelbase", Name: "SIMAGIC Alpha Series Wheelbase"}, State: usbdev.StateAbsent},
+		{Known: usbdev.Known{Alias: "wheelbase", Name: "SIMAGIC Alpha EVO Pro"}, State: usbdev.StateAbsent},
 	}
 }
 
