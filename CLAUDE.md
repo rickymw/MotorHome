@@ -1,7 +1,7 @@
 # CLAUDE.md — MotorHome
 
 ## Project overview
-Windows CLI tool (`motorhome.exe`) that launches, monitors, and closes sim racing apps in sequence, analyses iRacing `.ibt` telemetry files, and records voice notes during a session. Designed for Stream Deck integration. Eleven subcommands: `start`, `stop`, `status`, `analyze`, `coach`, `pb`, `notes`, `live`, `camera`, `usb`, `gui`. Accepts an optional `-config <path>` flag.
+Windows CLI tool (`motorhome.exe`) that launches, monitors, and closes sim racing apps in sequence, analyses iRacing `.ibt` telemetry files, and records voice notes during a session. Designed for Stream Deck integration. Twelve subcommands: `start`, `stop`, `status`, `analyze`, `coach`, `pb`, `notes`, `live`, `camera`, `usb`, `shaker`, `gui`. Accepts an optional `-config <path>` flag.
 
 ## Documentation rule
 When making any code change, always review and update documentation to match:
@@ -117,6 +117,11 @@ motorhome usb on pedals                             # re-enable it
 motorhome usb toggle handbrake                      # flip whichever way it currently is
 motorhome usb off all                               # disable every connected sim device
 motorhome usb scan                                  # every USB device on the machine, for adding to the list
+motorhome shaker                                    # list audio outputs, name the one a test would use
+motorhome shaker test                               # gentle 2%-50% ramp at 40Hz, Ctrl-C aborts
+motorhome shaker test -max 0.2                      # stop the ramp at 20% of full scale
+motorhome shaker tone -level 0.1 -secs 3            # one fixed tone
+motorhome shaker tone -freq 25 -device "KT USB"     # different frequency, explicit device
 motorhome gui                                       # web interface on 127.0.0.1:7777, opens a browser
 motorhome gui -port 8080 -no-open                   # different port, do not open a browser
 ```
@@ -161,6 +166,7 @@ Each package has its own README with full detail. Below is a terse summary with 
 | `internal/audio` | WinMM `Recorder.Start/Stop`; `BuildWAV` for Whisper input | [README](internal/audio/README.md) |
 | `internal/camera` | `Restarter` interface; Windows impl stops/starts `FrameServer`+`FrameServerMonitor` via raw SCM syscalls to un-stick a frozen webcam | [README](internal/camera/README.md) |
 | `internal/usbdev` | `Controller` interface; identifies sim-racing USB devices by VID/PID and enables/disables them via raw SetupAPI syscalls | [README](internal/usbdev/README.md) |
+| `internal/shaker` | `Player` interface; plays enveloped low-frequency tones at a tactile transducer via raw WinMM `waveOut*` syscalls | [README](internal/shaker/README.md) |
 | `internal/gui` | Stdlib-only local web interface; `Deps` injection keeps it cross-platform, `guardLocal` keeps it loopback-only | [README](internal/gui/README.md) |
 
 ### Config (`launcher.config.json`)
@@ -397,6 +403,30 @@ different device than the one named.
 
 Two Win32 notes: `SetupDiGetClassDevs` will **not** accept a device instance ID as its `Enumerator` despite the documentation saying it does (fails `ERROR_INVALID_DATA` — verified on this rig), so `openDevice` uses `SetupDiCreateDeviceInfoList` + `SetupDiOpenDeviceInfoW`; and enable clears `DICS_FLAG_CONFIGSPECIFIC` *then* `DICS_FLAG_GLOBAL` while disable sets only `DICS_FLAG_GLOBAL`, because a device can be disabled in either scope and clearing one leaves it disabled while reporting success.
 
+### shaker subcommand flow (`cmd/motorhome/shaker.go`)
+
+Plays a low-frequency tone at a tactile transducer (ButtKicker) through its audio output device, to test it without launching a sim. Full detail in [internal/shaker/README.md](internal/shaker/README.md).
+
+| Command | Behaviour |
+|---|---|
+| `shaker` / `shaker devices` | List audio output devices and say which one a test would use |
+| `shaker test [-max 0-1]` | Ramp 2% → 50% of full scale in steps, abortable between each |
+| `shaker tone [-level N]` | One tone at a fixed level |
+
+Shared flags: `-device` (name substring), `-freq` (Hz), `-secs`, `-gap`.
+
+**The default action is `devices`, not `test`.** This command makes the seat move; a bare `motorhome shaker` typed to see what the command does should not be what starts that.
+
+**There is no default-output-device fallback.** A 40 Hz tone into headphones is unpleasant, and into a full-range speaker at level is a way to damage a woofer — so an unmatched or ambiguous `-device` is an error listing the devices, never a guess. The ButtKicker amplifier enumerates as `KT USB Audio` (its manufacturer's name, nothing resembling "ButtKicker"), which is `shaker.DefaultDeviceMatch`.
+
+**Amplitude ramps rather than being set, and every tone is enveloped.** The first test after a transducer has sat unused is when a fault shows up, so playback starts below anything that could stress the amplifier and climbs in abortable steps. A sine starting at full amplitude is a DC step — a mechanical slam in a transducer — so `Tone.PCM` fades in and out, computing the envelope inside the sample loop so a tone shorter than two fades degrades to a triangle instead of clipping back to a step.
+
+**Ctrl-C calls `Player.Stop`, not the default handler.** An interrupt during playback would otherwise leave the device open with a buffer queued and the tone still sounding after the command had apparently exited. `Stop` is `waveOutReset`, which marks queued buffers done — silencing the device and releasing the poll loop in `Play` with one call.
+
+**The summary is deliberately narrow about what it proves**, and a test asserts the wording. Windows accepting every buffer says the PC-to-amplifier path works; it cannot say the transducer moved, and it says nothing about whether the amplifier is electrically sound. Reporting a clean run as "working" is the wrong thing to tell someone testing hardware they already suspect — which is the case this was built for (a ButtKicker that smelled of burning electronics on first power-up after a long idle).
+
+Dispatched before `config.Load` like `camera` and `usb`: it reads nothing from the config, and is most likely to be run while diagnosing hardware just moved or rebuilt — the moment a config is least likely to be in place.
+
 ### Corner labelling and the Turns line
 Detected corners are auto-labelled `T1`, `T2`, … in track order from the S/F line. **These are positional, not iRacing's official turn numbers.** Detection merges complexes, so the counts often differ — Road America reports `TrackNumTurns: 14` while detection finds 11 corner segments, and from the first merge onward every generated label is offset (the detected 8th corner is really the Kink).
 
@@ -574,6 +604,10 @@ All live next to the binary in `G:\RACING\SimAppLauncher\`:
 - `usb` toggles the whole top-level USB device, so disabling the MOZA handbrake also takes down its `COM6` serial interface (used by MOZA Pit House). Toggling a single interface is possible but would leave the physical device half-on in a way the output could not sensibly describe
 - A game that enumerated its controllers at startup may need restarting to notice a device appearing or disappearing; `usb` says so after any change it makes
 - `usb` depends on UAC elevation being silent on this machine. On a box that prompts, every state change would raise a consent dialog — workable from a terminal, bad from a Stream Deck button mid-session. The fallback would be a one-time elevated scheduled task triggered by the unelevated binary, the same shape as the `camera` service ACL
+- `shaker` can only verify the path from PC to amplifier — that Windows accepted the format, opened the device and played the buffers. It cannot detect whether the transducer moved, and nothing in software can tell you an amplifier is electrically sound. The summary says so rather than reporting a clean run as "working"
+- `shaker` picks its device by name substring, and WinMM truncates device names to 32 characters (`MAXPNAMELEN`), so a device whose distinguishing part falls past that cutoff cannot be matched. Reading full names means WASAPI COM interop, which is a lot of vtable plumbing for a cosmetic gain
+- `shaker` has no sweep mode. A 20–80 Hz sweep is the better tool for finding rattles and resonances, but it drives the amplifier continuously, which is the opposite of what the stepped ramp is for
+- `shaker` output level is a fraction of digital full scale, not a physical one. What 20% actually does depends entirely on the amplifier's gain knob, so the ramp is a relative test and the numbers are not comparable between rigs or after a gain change
 - `processName` whitespace is not trimmed — accidental spaces will cause silent match failures
 - Segment detection with `lataccel` method only uses lateral G — pure braking zones with no lateral load appear as straights (`latlon` default avoids this)
 - S/F line wraparound: tiny corners (< 50 m) at the S/F line are auto-removed, but if the first and last segments are both straights they are not merged into one

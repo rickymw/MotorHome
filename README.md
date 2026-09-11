@@ -17,6 +17,7 @@ A Windows CLI tool that launches sim racing apps in sequence, analyses iRacing `
 - **Voice notes** — press a hotkey to record, auto-transcribed via Whisper, and placed on the exact lap and corner you were driving when you spoke
 - **PB store management** — list, inspect, prune, and diff the setup you're running now against the setup that set your PB
 - **JSON output** — the whole analysis as a structured document for AI coaching or any other downstream tool
+- **Transducer test** — `motorhome shaker test` ramps a 40 Hz tone from near-silence at a ButtKicker, so you can check it works without launching a sim, and abort the instant anything seems wrong
 - **Web interface** — `motorhome gui` serves a local dashboard covering the rig controls, the settings file, session analysis, live gaps and the PB store. No dependencies, no build step, loopback only
 
 ## Requirements
@@ -34,7 +35,7 @@ go build -o motorhome.exe ./cmd/motorhome
 ## Subcommands
 
 ```
-motorhome [-config <path>] <start|stop|status|analyze|coach|pb|notes|live|camera|usb|gui>
+motorhome [-config <path>] <start|stop|status|analyze|coach|pb|notes|live|camera|usb|shaker|gui>
 ```
 
 | Subcommand | Description |
@@ -49,6 +50,7 @@ motorhome [-config <path>] <start|stop|status|analyze|coach|pb|notes|live|camera
 | `live` | Live position + gap in seconds to the car directly ahead and behind on track |
 | `camera` | Restart a stuck/frozen webcam by restarting the Windows Camera Frame Server |
 | `usb` | List, scan for, and enable/disable the sim-racing USB devices |
+| `shaker` | Test a ButtKicker / tactile transducer with a gentle low-frequency ramp |
 | `gui` | Serve the web interface on `127.0.0.1` — rig control, settings, analysis, live gaps, personal bests |
 
 ---
@@ -542,6 +544,51 @@ say which list is in use.
 
 See [internal/usbdev/README.md](internal/usbdev/README.md) for why devices are matched by vendor/product ID rather than name, and why composite devices are toggled at the top-level node.
 
+---
+
+## Transducer / ButtKicker Test
+
+```powershell
+.\motorhome.exe shaker                 # list audio outputs, name the one a test would use
+.\motorhome.exe shaker test            # gentle 2% -> 50% ramp at 40 Hz
+.\motorhome.exe shaker test -max 0.2   # stop the ramp at 20% of full scale
+.\motorhome.exe shaker tone -level 0.1 -secs 3
+```
+
+Plays a low-frequency tone at a tactile transducer so you can check it works without launching a sim and driving it with a whole session's effects.
+
+```
+  Audio output devices:
+    0  Speakers (Razer Clio Surround)
+    1  Headphones (KT USB Audio)
+    2  OnBoard (Realtek(R) Audio)
+
+  `shaker test` would play to: Headphones (KT USB Audio) (device 1)
+```
+
+A ButtKicker amplifier enumerates under its manufacturer's name — **KT USB Audio** — with nothing in the string resembling "ButtKicker". That name is the default target; `-device` takes any substring of another.
+
+**It never falls back to your default audio device.** A 40 Hz tone into headphones is unpleasant, and into a full-range speaker at level is a way to damage a woofer, so a `-device` that matches nothing or matches two things is an error listing the devices rather than a guess.
+
+`shaker test` ramps from 2% to 50% of full scale in steps, pausing between each:
+
+```
+Transducer test — Headphones (KT USB Audio)
+
+Stepping up from near-silence. Ctrl-C cuts the output immediately —
+use it at the first sign of anything wrong, including a smell.
+
+      2%   40.0 Hz  1.5s
+      5%   40.0 Hz  1.5s
+     10%   40.0 Hz  1.5s
+```
+
+It starts that quietly because the first test after a transducer has sat unused is also when a fault shows up. Ctrl-C cuts the output immediately rather than letting the process die with a buffer still queued. Every tone fades in and out — a sine starting at full amplitude is a DC step, which in a transducer bolted to a seat is a mechanical slam.
+
+> **What a clean run proves, and what it doesn't.** It proves Windows accepted the format, opened the device and played every buffer — the path from PC to amplifier works. It cannot tell whether the transducer actually moved, and **nothing in software can tell you an amplifier is electrically sound.** If you smell burning, see a bulged capacitor, or the case gets hot, stop and get the amplifier looked at. The level numbers are also relative: what 20% does depends entirely on where the amplifier's gain knob is set.
+
+See [internal/shaker/README.md](internal/shaker/README.md) for the envelope and device-matching detail.
+
 ## Configuration
 
 `launcher.config.json` lives next to the binary. Override with `-config <path>`.
@@ -657,6 +704,7 @@ go test -tags e2e -v ./internal/launcher/ -run TestE2E_FullStack -timeout 120s  
 | `internal/audio` | Microphone recording via WinMM | [README](internal/audio/README.md) |
 | `internal/camera` | Restarts the Windows Camera Frame Server | [README](internal/camera/README.md) |
 | `internal/usbdev` | Identifies sim-racing USB devices and enables/disables them | [README](internal/usbdev/README.md) |
+| `internal/shaker` | Plays low-frequency test tones at a tactile transducer | [README](internal/shaker/README.md) |
 | `internal/gui` | Local web interface served by `motorhome gui` | [README](internal/gui/README.md) |
 
 ---

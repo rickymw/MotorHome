@@ -21,7 +21,7 @@ func defaultConfigPath() string {
 func main() {
 	cfgPath := flag.String("config", defaultConfigPath(), "path to config file")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: motorhome [-config <path>] <start|stop|status|analyze|coach|pb|notes|live|camera|usb|gui>")
+		fmt.Fprintln(os.Stderr, "Usage: motorhome [-config <path>] <start|stop|status|analyze|coach|pb|notes|live|camera|usb|shaker|gui>")
 		fmt.Fprintln(os.Stderr, "       motorhome analyze [-lap N] [-update-map] [-json] [-dump T3 [-dump-all]] [file.ibt]")
 		fmt.Fprintln(os.Stderr, "       motorhome coach [-lap N] [-table] [file.ibt]")
 		fmt.Fprintln(os.Stderr, "       motorhome pb [list|show|diff|prune]")
@@ -31,6 +31,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "       motorhome gui [-port N] [-no-open]")
 		fmt.Fprintln(os.Stderr, "       motorhome usb [list|scan] [-v]")
 		fmt.Fprintf(os.Stderr, "       motorhome usb <on|off|toggle> <%s>   (`usb list` names your devices)\n", usbTargetHint())
+		fmt.Fprintln(os.Stderr, "       motorhome shaker [devices]")
+		fmt.Fprintln(os.Stderr, "       motorhome shaker <test|tone> [-device S] [-freq Hz] [-secs N]")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -41,18 +43,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	// camera and usb read nothing from the config, and are the subcommands most
-	// likely to run from a bare copy of the exe — un-sticking a webcam
-	// redirected into an RDP session means running it on the far end, where
-	// there is no launcher.config.json, and usb re-runs this exe elevated,
-	// where the working directory is not the user's. Dispatch both before the
-	// config load so a missing config can't block them.
+	// camera, usb and shaker read nothing from the config, and are the
+	// subcommands most likely to run from a bare copy of the exe — un-sticking
+	// a webcam redirected into an RDP session means running it on the far end,
+	// where there is no launcher.config.json, and usb re-runs this exe
+	// elevated, where the working directory is not the user's. Dispatch them
+	// before the config load so a missing config can't block them.
 	switch args[0] {
 	case "camera":
 		RunCamera(args[1:])
 		return
 	case "usb":
 		os.Exit(RunUSB(args[1:], *cfgPath))
+	case "shaker":
+		// Reads nothing from the config either, and is the subcommand most
+		// likely to be run while diagnosing hardware that has just been moved
+		// or rebuilt — the moment a config is least likely to be in place.
+		os.Exit(RunShaker(args[1:]))
 	case "gui":
 		// Also dispatched ahead of the config load, but for a different reason
 		// than camera and usb: the GUI's settings panel exists to *fix* the
