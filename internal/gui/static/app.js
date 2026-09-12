@@ -437,21 +437,131 @@ $("#btn-live-toggle").addEventListener("click", () => {
 
 $("#live-hz").addEventListener("change", () => { if (liveSource) startLiveStream(); });
 
-function gapRow(label, gap) {
-  if (!gap) {
-    return el("div", { class: "gap-row" },
-      el("div", { class: "who" }, el("span", { class: "muted", text: `${label}: nobody on track` })));
-  }
-  const lapNote = gap.lapsDelta
-    ? ` (${gap.lapsDelta > 0 ? "+" : ""}${gap.lapsDelta} lap${Math.abs(gap.lapsDelta) === 1 ? "" : "s"})`
-    : "";
-  return el("div", { class: "gap-row" },
-    el("div", { class: "who" },
-      el("span", { class: "muted small", text: label + "  " }),
-      el("strong", { text: gap.driverName || "?" }),
-      el("span", { class: "muted small", text: gap.carNumber ? `  #${gap.carNumber}` : "" }),
-      el("span", { class: "muted small", text: lapNote })),
-    el("div", { class: "delta", text: fmt.signed(gap.timeSeconds) + "s" }));
+/* The live panel doubles as a survey of what iRacing publishes, for deciding
+ * what future dashboard elements can be built on. So every value carries the
+ * shared-memory variable it came from, and values the server computed rather
+ * than read say so — a derived number is only as good as its derivation, and
+ * that is worth knowing before putting it on a dashboard. */
+
+function liveStat(label, value, source, cls) {
+  return el("div", { class: "stat" },
+    el("div", { class: "label", text: label }),
+    el("div", { class: ["value", cls].filter(Boolean).join(" "), text: value }),
+    source && el("div", { class: "var", text: source }));
+}
+
+function liveSection(title, ...kids) {
+  return el("div", { class: "live-section" }, el("h3", { text: title }), ...kids);
+}
+
+/* lapClock renders m:ss.mmm. Zero is iRacing's "no lap yet" and a negative
+ * last lap is its marker for an invalidated one. */
+function lapClock(s) {
+  if (s === null || s === undefined || s === 0) return "—";
+  if (s < 0) return "invalid";
+  const ms = Math.round(s * 1000);
+  const m = Math.floor(ms / 60000);
+  const rest = ((ms - m * 60000) / 1000).toFixed(3);
+  return m ? `${m}:${rest.padStart(6, "0")}` : rest;
+}
+
+const deltaClass = (s) => (s < 0 ? "good" : s > 0 ? "bad" : null);
+
+const DELTA_REFS = [
+  { ref: "best", label: "Your best lap", variable: "LapDeltaToBestLap" },
+  { ref: "optimal", label: "Your optimal lap", variable: "LapDeltaToOptimalLap" },
+  { ref: "last", label: "Your last lap", variable: "LapDeltaToSessionLastlLap" },
+  { ref: "sessionBest", label: "Session best lap", variable: "LapDeltaToSessionBestLap" },
+  { ref: "sessionOptimal", label: "Session optimal lap", variable: "LapDeltaToSessionOptimalLap" },
+];
+
+function renderTiming(t) {
+  if (!t) return liveSection("Lap timing", el("p", { class: "muted", text: "Not published." }));
+  const byRef = Object.fromEntries((t.deltas || []).map((d) => [d.ref, d]));
+  const valid = (ref) => byRef[ref] && byRef[ref].valid;
+  // An invalid delta is iRacing still publishing a number with nothing to
+  // compare it against. Showing it would be a confident delta to no lap.
+  const hero = valid("best")
+    ? liveStat("Delta to best", fmt.signed(byRef.best.seconds, 2), "LapDeltaToBestLap", deltaClass(byRef.best.seconds))
+    : liveStat("Delta to best", "—", "LapDeltaToBestLap (no reference lap yet)");
+
+  const trend = (d) => {
+    if (d.rate > 0.01) return "losing";
+    if (d.rate < -0.01) return "gaining";
+    return "steady";
+  };
+
+  return liveSection("Lap timing",
+    el("div", { class: "live-hero" },
+      hero,
+      liveStat("Current", lapClock(t.currentLap), "LapCurrentLapTime"),
+      liveStat("Last", lapClock(t.lastLap), "LapLastLapTime"),
+      liveStat("Best", lapClock(t.bestLap) + (t.bestLapNum && t.bestLap > 0 ? ` (L${t.bestLapNum})` : ""),
+        "LapBestLapTime / LapBestLap")),
+    table([
+      { head: "Reference", get: (r) => r.label },
+      { head: "Delta", num: true, get: (r) => (valid(r.ref) ? fmt.signed(byRef[r.ref].seconds) : "—"),
+        cls: (r) => (valid(r.ref) ? deltaClass(byRef[r.ref].seconds) : null) },
+      { head: "Rate s/s", num: true, get: (r) => (valid(r.ref) ? fmt.signed(byRef[r.ref].rate, 3) : "—") },
+      { head: "Trend", get: (r) => (valid(r.ref) ? trend(byRef[r.ref]) : "—") },
+      { head: "Valid", get: (r) => (valid(r.ref) ? "yes" : "no") },
+      { head: "Variable", get: (r) => el("span", { class: "var", text: `${r.variable} (+ _DD, _OK)` }) },
+    ], DELTA_REFS));
+}
+
+function renderFuel(f) {
+  if (!f) return liveSection("Fuel", el("p", { class: "muted", text: "FuelLevel is not published for this car." }));
+  const measured = f.measuredLaps > 0;
+  const perLap = (v) => (measured ? fmt.n(v, 2) + " L" : "—");
+  const lapsLeft = (v) => (measured ? fmt.n(v, 1) : "—");
+  const derived = "derived from FuelLevel";
+
+  return liveSection("Fuel",
+    el("div", { class: "live-hero" },
+      liveStat("In tank", fmt.n(f.litres, 2) + " L", "FuelLevel"),
+      liveStat("Tank", fmt.n(f.pct * 100, 0) + "%", "FuelLevelPct"),
+      // Worst first: planning a stint on the average runs dry half the time.
+      liveStat("Laps left (worst)", lapsLeft(f.lapsLeftWorst), derived),
+      liveStat("Laps left (avg)", lapsLeft(f.lapsLeftAverage), derived)),
+    el("div", { class: "live-hero" },
+      liveStat("Per lap (worst)", perLap(f.perLapWorst), derived),
+      liveStat("Per lap (avg)", perLap(f.perLapAverage), derived),
+      liveStat("Last lap", perLap(f.lastLap), derived),
+      liveStat("Burn now", fmt.n(f.usePerHourKg, 1) + " kg/h", "FuelUsePerHour (instantaneous)")),
+    el("p", { class: "muted small" }, measured
+      ? `Averaged over the last ${f.measuredLaps} measured lap${f.measuredLaps === 1 ? "" : "s"} (window ${f.windowLaps}).`
+      : "No lap measured yet."),
+    el("p", { class: "muted small" },
+      "A lap only counts if it was streamed from line to line: pit road, a refuel, or a gap in streaming " +
+      "discards it. The estimate lives in the server, so it survives switching tabs but not a restart."));
+}
+
+const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+
+function renderConditions(c) {
+  if (!c) return liveSection("Conditions", el("p", { class: "muted", text: "No weather variables published." }));
+  // Absent is not zero: a build that does not publish a variable says so,
+  // rather than reporting 0 °C or a dry track.
+  const opt = (v, render) => (v === null || v === undefined ? "n/a" : render(v));
+  const pct = (v) => fmt.n(v * 100, 0) + "%";
+
+  return liveSection("Conditions",
+    el("div", { class: "live-hero" },
+      liveStat("Air", opt(c.airTempC, (v) => fmt.n(v, 1) + " °C"), "AirTemp"),
+      liveStat("Track", opt(c.trackTempC, (v) => fmt.n(v, 1) + " °C"), "TrackTempCrew"),
+      liveStat("Humidity", opt(c.humidity, pct), "RelativeHumidity"),
+      liveStat("Wind", opt(c.windMS, (v) => fmt.n(v * 3.6, 1) + " km/h"), "WindVel"),
+      // iRacing does not document whether this is where the wind blows from
+      // or to, so the label stays neutral.
+      liveStat("Wind dir", opt(c.windDirDeg, (v) => `${Math.round(v)}° ${COMPASS[Math.round(v / 22.5) % 16]}`), "WindDir")),
+    el("div", { class: "live-hero" },
+      liveStat("Skies", c.skies || "n/a", "Skies"),
+      liveStat("Track surface", c.trackWetness || "n/a", "TrackWetness"),
+      liveStat("Rain", opt(c.precipitation, pct), "Precipitation"),
+      liveStat("Wet declared", opt(c.declaredWet, (v) => (v ? "yes" : "no")), "WeatherDeclaredWet"),
+      liveStat("Fog", opt(c.fogLevel, pct), "FogLevel"),
+      liveStat("Pressure", opt(c.airPressureHPa, (v) => fmt.n(v, 0) + " hPa"), "AirPressure"),
+      liveStat("Air density", opt(c.airDensity, (v) => fmt.n(v, 3) + " kg/m³"), "AirDensity")));
 }
 
 function renderLive(d) {
@@ -469,17 +579,18 @@ function renderLive(d) {
   const cls = d.classPosition && d.classSize ? `${d.classPosition}/${d.classSize}` : null;
 
   clear(view,
-    el("p", { class: "muted small" }, `${d.track || "?"} — ${d.car || "?"}`),
+    el("p", { class: "muted small" }, `${d.track || "?"} — ${d.car || "?"}  `,
+      d.onPitRoad && el("span", { class: "pill off", text: "PIT ROAD" })),
     el("div", { class: "live-hero" },
-      el("div", { class: "stat" }, el("div", { class: "label", text: "Position" }), el("div", { class: "value", text: pos })),
-      cls && el("div", { class: "stat" }, el("div", { class: "label", text: "In class" }), el("div", { class: "value", text: cls })),
-      el("div", { class: "stat" }, el("div", { class: "label", text: "Lap" }), el("div", { class: "value", text: d.lap || "?" })),
-      el("div", { class: "stat" }, el("div", { class: "label", text: "Lap %" }), el("div", { class: "value", text: fmt.n((d.lapDistPct || 0) * 100) }))),
+      liveStat("Position", pos, "CarIdxPosition"),
+      cls && liveStat("In class", cls, "CarIdxClassPosition"),
+      liveStat("Lap", String(d.lap || "?"), "CarIdxLapCompleted + 1"),
+      liveStat("Lap %", fmt.n((d.lapDistPct || 0) * 100), "LapDistPct")),
     el("div", { class: "progress-track" },
       el("div", { class: "progress-fill", style: `width:${Math.max(0, Math.min(1, d.lapDistPct || 0)) * 100}%` })),
-    el("div", { style: "margin-top:14px" },
-      gapRow("Ahead", d.ahead),
-      gapRow("Behind", d.behind)));
+    renderTiming(d.timing),
+    renderFuel(d.fuel),
+    renderConditions(d.conditions));
 }
 
 /* ── sessions / analysis ───────────────────────────────────────────── */

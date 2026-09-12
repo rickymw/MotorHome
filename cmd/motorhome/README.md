@@ -36,7 +36,7 @@ Parses the `-config` flag, loads the config file, and dispatches to one of eleve
 | `analyze_notes_test.go` | Tests for notes file resolution, note/consistency rendering, and the JSON document |
 | `analyze_json_build_test.go` | Tests for `buildAnalyzeResult` and the JSON section builders |
 | `analyze_pb_render_test.go` | Tests for `phasesToPB` and the stored-PB renderers |
-| `live_test.go` | Tests for the live gap/position formatters (Windows-tagged, like `live.go`) |
+| `live_test.go` | Tests for the live gap/position formatters and the `-raw` dump (Windows-tagged, like `live.go`) |
 | `notes_paths_test.go` | Tests for session-file naming, whisper path resolution, clipboard |
 | `pb_test.go` | Tests for pb entry ordering, filtering and stored-payload markers |
 | `pb_cmd_test.go` | Tests for `pb list`/`show`/`prune`, including that a dry run writes nothing |
@@ -51,7 +51,8 @@ Parses the `-config` flag, loads the config file, and dispatches to one of eleve
 | `elevate_windows.go` | `winIsElevated` / `winRelaunchElevated` — token check and `ShellExecuteExW runas` re-exec used by `usb` |
 | `usb_test.go` | Tests for usb listing, toggling, absent devices and the elevation hand-off |
 | `gui.go` | `RunGUI` — serve the web interface; `subcommandRunner` re-exec helper, `openBrowser` |
-| `gui_windows.go` | `attachPlatformDeps` — wires the shared-memory, SetupAPI and service-control providers into `gui.Deps`; builds `LiveSnapshot` via `gapsFromLive` |
+| `gui_windows.go` | `attachPlatformDeps` — wires the shared-memory, SetupAPI and service-control providers into `gui.Deps`; `snapshotFromLive` builds `LiveSnapshot` (position, lap timing, fuel with a stateful `FuelTracker`, conditions) |
+| `gui_windows_test.go` | Tests for `snapshotFromLive`: delta validity, fuel tracking across frames, unit conversion, absent weather variables |
 | `gui_other.go` | The same, as a no-op, so the package builds off Windows |
 | `gui_test.go` | Re-exec tests for `subcommandRunner`: config threading, stderr capture, timeout |
 
@@ -324,12 +325,20 @@ A `context.WithTimeout` bounds each run, and an expired deadline is reported as
 
 ### The live snapshot
 
-`liveProvider.Snapshot` calls `gapsFromLive` — the helper `live.go` already uses
-— rather than recomputing which car is ahead. That function encodes decisions
-that are not obvious (shortest on-track distance rather than race position, the
-`EstTime` fallback when two cars straddle the S/F line), and a second
-implementation would eventually disagree with the terminal about the same
-moment.
+`liveProvider.Snapshot` reads shared memory and hands it to `snapshotFromLive`,
+which is split out so the conversion is testable without a running sim
+(`gui_windows_test.go`). Position and lap use `idxValue`/`countValidCars` from
+`live.go`, so the page and the terminal agree about them.
+
+The provider is a **pointer that lives for the whole server** because it owns an
+`iracing.FuelTracker`: per-lap burn is measured across lap boundaries, and a
+provider rebuilt per request would forget every lap it had watched. Every
+connected frame is fed to the tracker, including ones where the tank is not
+published or the player is out of the car, so an interruption breaks the lap in
+progress instead of being skipped over.
+
+The panel no longer carries car-ahead/behind gaps, so the shim no longer calls
+`gapsFromLive`; `live.go` still does.
 
 It differs from `printGapView` in one place: the Win32 reason goes into
 `Detail`, not `Message`. `live` printing `OpenFileMappingW: The system cannot

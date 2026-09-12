@@ -299,3 +299,26 @@ func TestPrintSnapshotCompactAndVerbose(t *testing.T) {
 			compact, verbose)
 	}
 }
+
+// -raw is the place to check what the sim actually published, so it must show
+// the player scalars and keep an unpublished variable distinguishable from zero.
+func TestPrintSnapshotVerbose_PlayerScalars(t *testing.T) {
+	ld := connectedFixture() // gui_windows_test.go
+
+	out := captureStdoutForTest(t, func() { printSnapshotVerbose(ld) })
+
+	for _, want := range []string{
+		"current=55.004",
+		"ToBest          : -0.254 s",
+		"ok=true",
+		"20.75 l",
+		"air=27.15",
+		"skies=1",
+		"humidity=n/a", // not in the fixture: absent, not 0
+		"declaredWet=n/a",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("verbose output missing %q:\n%s", want, out)
+		}
+	}
+}

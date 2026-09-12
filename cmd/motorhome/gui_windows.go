@@ -3,6 +3,8 @@
 package main
 
 import (
+	"math"
+
 	"github.com/rickymw/MotorHome/internal/camera"
 	"github.com/rickymw/MotorHome/internal/gui"
 	"github.com/rickymw/MotorHome/internal/iracing"
@@ -15,7 +17,7 @@ import (
 // manager, and WinMM audio output. internal/gui stays free of all of them so it
 // compiles and tests on any OS; this file is the only place they meet.
 func attachPlatformDeps(deps *gui.Deps) {
-	deps.Live = liveProvider{}
+	deps.Live = &liveProvider{}
 	deps.USB = usbProvider{}
 	deps.Camera = camera.NewRestarter()
 	deps.Shaker = shaker.NewPlayer()
@@ -38,18 +40,23 @@ func (usbProvider) Scan(known []usbdev.Known) ([]usbdev.Scanned, error) {
 	return usbdev.NewController(known).Scan()
 }
 
-type liveProvider struct{}
+// liveProvider holds the fuel tracker, which is why it is a pointer and lives
+// for the whole server: consumption is measured across lap boundaries, and a
+// provider rebuilt per request would forget every lap it had watched.
+type liveProvider struct {
+	fuel iracing.FuelTracker
+}
 
-// Snapshot reduces a shared-memory read to the same view the `live` subcommand
-// prints.
+func (p *liveProvider) Snapshot() gui.LiveSnapshot {
+	return snapshotFromLive(iracing.ReadLiveData(), &p.fuel)
+}
+
+// snapshotFromLive reduces a shared-memory read to the panel's wire shape.
 //
-// It calls gapsFromLive — the helper live.go already uses — rather than
-// recomputing which car is ahead. That function encodes decisions that are not
-// obvious (shortest on-track distance rather than race position, the EstTime
-// fallback when two cars straddle the S/F line), and a second implementation
-// would eventually disagree with the terminal about the same moment.
-func (liveProvider) Snapshot() gui.LiveSnapshot {
-	ld := iracing.ReadLiveData()
+// Position and lap use the same helpers the `live` subcommand prints with, so
+// the browser and the terminal cannot disagree about them. It is split from
+// Snapshot so the conversion is testable without a running sim.
+func snapshotFromLive(ld iracing.LiveData, fuel *iracing.FuelTracker) gui.LiveSnapshot {
 	if !ld.Connected {
 		// The Win32 reason goes in Detail rather than becoming the message.
 		// Not connected is overwhelmingly "the sim is not running", and
@@ -68,6 +75,7 @@ func (liveProvider) Snapshot() gui.LiveSnapshot {
 		Car:        ld.Car,
 		LapDistPct: ld.LapDistPct,
 		FieldSize:  countValidCars(ld.CarIdxLapDistPct),
+		OnPitRoad:  ld.OnPitRoad,
 	}
 
 	if ld.MyCarIdx >= 0 {
@@ -93,26 +101,92 @@ func (liveProvider) Snapshot() gui.LiveSnapshot {
 		}
 	}
 
-	ahead, behind := gapsFromLive(ld)
-	snap.Ahead = toLiveGap(ld, ahead)
-	snap.Behind = toLiveGap(ld, behind)
+	snap.Timing = liveTiming(ld.Lap)
+	snap.Fuel = liveFuel(ld, fuel)
+	snap.Conditions = liveConditions(ld.Conditions)
 	return snap
 }
 
-// toLiveGap converts one neighbour, returning nil when there is nobody in that
-// direction. nil rather than a zero struct so the browser can tell "solo
-// session" from "a car exactly alongside".
-func toLiveGap(ld iracing.LiveData, g iracing.GapTo) *gui.LiveGap {
-	if g.CarIdx < 0 {
+func liveTiming(l iracing.LapTiming) *gui.LiveTiming {
+	return &gui.LiveTiming{
+		CurrentLap: l.Current,
+		LastLap:    l.Last,
+		BestLap:    max(l.Best, 0),
+		BestLapNum: int(l.BestLapNum),
+		Deltas: []gui.LiveDelta{
+			liveDelta("best", l.ToBest),
+			liveDelta("optimal", l.ToOptimal),
+			liveDelta("sessionBest", l.ToSessionBest),
+			liveDelta("sessionOptimal", l.ToSessionOptimal),
+			liveDelta("last", l.ToLast),
+		},
+	}
+}
+
+func liveDelta(ref string, d iracing.LapDelta) gui.LiveDelta {
+	return gui.LiveDelta{Ref: ref, Seconds: d.Seconds, Rate: d.Rate, Valid: d.Valid}
+}
+
+// liveFuel feeds the tracker on every connected frame, including ones where
+// the tank is not published, so that a missing reading breaks the lap in
+// progress rather than being skipped over.
+func liveFuel(ld iracing.LiveData, tracker *iracing.FuelTracker) *gui.LiveFuel {
+	est := tracker.Observe(iracing.FuelSample{
+		SessionUniqueID: ld.SessionUniqueID,
+		SessionNum:      ld.SessionNum,
+		SessionTime:     ld.SessionTime,
+		LapCompleted:    ld.LapCompleted,
+		Litres:          ld.Fuel.Litres,
+		OnPitRoad:       ld.OnPitRoad,
+		Valid:           ld.Fuel.Available && ld.IsOnTrack,
+	})
+	if !ld.Fuel.Available {
 		return nil
 	}
-	out := &gui.LiveGap{
-		TimeSeconds: g.TimeSeconds,
-		LapsDelta:   int(g.LapsDelta),
+	return &gui.LiveFuel{
+		Litres:        ld.Fuel.Litres,
+		Pct:           ld.Fuel.Pct,
+		UsePerHourKg:  ld.Fuel.UsePerHourKg,
+		MeasuredLaps:  est.Laps,
+		WindowLaps:    iracing.FuelWindowLaps,
+		LastLap:       est.LastLap,
+		PerLapAverage: est.Average,
+		PerLapWorst:   est.Worst,
+		LapsLeftAvg:   est.LapsLeftAverage,
+		LapsLeftWorst: est.LapsLeftWorst,
 	}
-	if d, ok := ld.Drivers[g.CarIdx]; ok {
-		out.DriverName = d.UserName
-		out.CarNumber = d.CarNumber
+}
+
+// liveConditions converts units at the boundary so the page does no physics:
+// wind direction to degrees, pressure to hPa. Enums become names here because
+// the decoding tables live in internal/iracing next to the variables.
+func liveConditions(c iracing.Conditions) *gui.LiveConditions {
+	out := &gui.LiveConditions{
+		AirTempC:      c.AirTempC,
+		TrackTempC:    c.TrackTempC,
+		Humidity:      c.Humidity,
+		WindMS:        c.WindMS,
+		AirDensity:    c.AirDensity,
+		FogLevel:      c.FogLevel,
+		Precipitation: c.Precipitation,
+		DeclaredWet:   c.DeclaredWet,
+	}
+	if c.WindDirRad != nil {
+		deg := float32(math.Mod(float64(*c.WindDirRad)*180/math.Pi+360, 360))
+		out.WindDirDeg = &deg
+	}
+	if c.AirPressurePa != nil {
+		hpa := *c.AirPressurePa / 100
+		out.AirPressureHPa = &hpa
+	}
+	if c.Skies != nil {
+		out.Skies = iracing.SkiesName(*c.Skies)
+	}
+	if c.TrackWetness != nil {
+		out.TrackWetness = iracing.TrackWetnessName(*c.TrackWetness)
+	}
+	if *out == (gui.LiveConditions{}) {
+		return nil
 	}
 	return out
 }

@@ -18,7 +18,7 @@ A Windows CLI tool that launches sim racing apps in sequence, analyses iRacing `
 - **PB store management** — list, inspect, prune, and diff the setup you're running now against the setup that set your PB
 - **JSON output** — the whole analysis as a structured document for AI coaching or any other downstream tool
 - **Transducer test** — `motorhome shaker test` ramps a 40 Hz tone from near-silence at a ButtKicker, so you can check it works without launching a sim, and abort the instant anything seems wrong
-- **Web interface** — `motorhome gui` serves a local dashboard covering the rig controls (apps, USB devices, camera, transducer), the settings file, session analysis, live gaps and the PB store. No dependencies, no build step, loopback only
+- **Web interface** — `motorhome gui` serves a local dashboard covering the rig controls (apps, USB devices, camera, transducer), the settings file, session analysis, live telemetry and the PB store. No dependencies, no build step, loopback only
 
 ## Requirements
 
@@ -51,7 +51,7 @@ motorhome [-config <path>] <start|stop|status|analyze|coach|pb|notes|live|camera
 | `camera` | Restart a stuck/frozen webcam by restarting the Windows Camera Frame Server |
 | `usb` | List, scan for, and enable/disable the sim-racing USB devices |
 | `shaker` | Test a ButtKicker / tactile transducer with a gentle low-frequency ramp |
-| `gui` | Serve the web interface on `127.0.0.1` — rig control, settings, analysis, live gaps, personal bests |
+| `gui` | Serve the web interface on `127.0.0.1` — rig control, settings, analysis, live telemetry, personal bests |
 
 ---
 
@@ -399,6 +399,8 @@ Behind: #07   Jane Smith           -0.891s
 
 Gap math uses each car's `CarIdxEstTime` when both are on the same lap, otherwise falls back to distance × total-lap estimate. In a solo practice (no other cars) you'll see `(none)` for ahead/behind — that's expected.
 
+`-raw` also shows the player-car values the GUI live panel uses — lap times, the `LapDeltaTo*` channels with their validity flags, fuel, and weather — printing `n/a` for any variable the running iRacing build does not publish.
+
 ---
 
 ## Camera Restart
@@ -641,7 +643,7 @@ Five panels:
 | Panel | What it does |
 |---|---|
 | **Rig** | Start/stop/status of the configured apps, USB device toggles and a scanner for adding new ones, camera restart |
-| **Live** | Position, lap, and gaps to the cars ahead and behind, streamed at 2–30 Hz |
+| **Live** | Position, lap timing and deltas, fuel with a running per-lap burn estimate, and track conditions, streamed at 2–30 Hz. Each value is labelled with the iRacing variable it came from |
 | **Sessions** | Pick an `.ibt` and render the full analysis — laps, sectors, phases, vs-PB deltas, exit impact, tyres, consistency, fuel, voice notes |
 | **Personal bests** | Browse `pb.json`; open an entry for its setup, phase data and stored brake points |
 | **Settings** | Edit `launcher.config.json` — driver, paths, hotkey, your USB device list, and the app list with reordering |
@@ -671,8 +673,8 @@ Nothing is reimplemented. Status and start/stop call the same `internal/launcher
 functions the CLI prints from; the analysis panel re-runs `motorhome analyze
 -json` as a subprocess (so a bad lap number returns an error instead of killing
 the server); USB toggles go through `motorhome usb`, which already handles the
-UAC elevation; and the live panel builds its gaps with the same helper `motorhome
-live` uses.
+UAC elevation; and the live panel builds position and lap with the same helpers
+`motorhome live` uses.
 
 `coach` has no panel — the brief exists to be pasted into an AI assistant, and a
 browser is not where that happens. Use `motorhome coach`.

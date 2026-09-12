@@ -138,11 +138,35 @@ mode exists to troubleshoot exactly this; a panel glanced at mid-session wants
 "iRacing is not running" with `OpenFileMappingW: The system cannot find the file
 specified` as small print underneath.
 
-The gap and position maths is **not** reimplemented here. `gui_windows.go` calls
-`gapsFromLive`, the helper `live.go` already uses, which encodes decisions that
-are not obvious (shortest on-track distance rather than race position; the
-`EstTime` fallback when two cars straddle the S/F line). A second implementation
-would eventually disagree with the terminal about the same moment.
+The panel shows position, lap timing and deltas, fuel, and track conditions. It
+**does not show the cars ahead and behind** — those were removed on 2026-09-12,
+when the panel's job became surveying which shared-memory values are worth
+building future dashboard elements on. `motorhome live` still prints the gaps.
+
+That survey role is why every value on the page is captioned with the iRacing
+variable it came from, and why the server-computed ones say `derived from …`
+instead: a derived number is only as trustworthy as its derivation, which is
+worth knowing before a dashboard is built on it.
+
+Three rules the snapshot follows:
+
+- **Absent is not zero.** `Fuel` and `Conditions` are nil when nothing in the
+  group is published, and each weather field is a pointer omitted from the JSON
+  when that one variable is missing. `0 °C` and `0%` rain are real readings.
+- **A delta travels with its `_OK` flag.** iRacing publishes a number for
+  `LapDeltaToSessionBestLap` even when no session best exists, so `LiveDelta`
+  carries `Valid` and the page shows `—` without it.
+- **Units are converted in the shim, not the page.** Wind direction arrives in
+  degrees, pressure in hPa, and `Skies`/`TrackWetness` as names — the decoding
+  tables live in `internal/iracing` next to the variables.
+
+The fuel estimate is **stateful**: `liveProvider` owns an
+`iracing.FuelTracker` for the life of the server, fed by every snapshot. It only
+measures laps someone was streaming through — see the `internal/iracing` README
+for which laps it discards and why.
+
+Position and lap come from the helpers `live.go` already uses, so the page and
+the terminal cannot disagree about them.
 
 ## The front end
 

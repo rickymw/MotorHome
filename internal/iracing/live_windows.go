@@ -25,6 +25,17 @@ type LiveData struct {
 	Car         string
 	ErrMsg      string // diagnostic; empty on success
 
+	// Player-car scalars. See player.go for units and the meaning of absent
+	// variables.
+	SessionNum      int32
+	SessionUniqueID int32
+	LapCompleted    int32 // LapCompleted — the player's own counter, −1 before the first crossing
+	IsOnTrack       bool
+	OnPitRoad       bool
+	Lap             LapTiming
+	Fuel            FuelState
+	Conditions      Conditions
+
 	MyCarIdx            int32 // player's CarIdx from session YAML (−1 if unresolved)
 	CarIdxLapDistPct    []float32
 	CarIdxLapCompleted  []int32
@@ -67,9 +78,11 @@ const (
 	vhOffName       = 16 // 32 bytes, null-terminated
 
 	// iRacing variable type codes
-	varTypeInt    = 2
-	varTypeFloat  = 4
-	varTypeDouble = 5
+	varTypeBool     = 1
+	varTypeInt      = 2
+	varTypeBitfield = 3
+	varTypeFloat    = 4
+	varTypeDouble   = 5
 
 	// irsdk_StatusField
 	iRSDKConnected = 1
@@ -168,6 +181,8 @@ func ReadLiveData() LiveData {
 	if v, ok := vars["LapDistPct"]; ok && v.varType == varTypeFloat {
 		ld.LapDistPct = readFloat32(base, dataBase+int(v.dataOffset))
 	}
+	r := scalarReader{base: base, dataBase: dataBase, vars: vars}
+	readPlayerScalars(&ld, r)
 
 	// CarIdx arrays — each is indexed by CarIdx. Count is published per-variable
 	// in the header (typically 64). We copy into Go slices so callers can use
@@ -265,4 +280,104 @@ func nullTermString(b []byte) string {
 		}
 	}
 	return string(b)
+}
+
+// scalarReader reads single-valued variables by name from the current data
+// buffer. Each accessor reports whether the variable exists with the expected
+// type, so a build that does not publish one reads as absent rather than zero.
+type scalarReader struct {
+	base     unsafe.Pointer
+	dataBase int
+	vars     map[string]varInfo
+}
+
+func (r scalarReader) f32(name string) (float32, bool) {
+	v, ok := r.vars[name]
+	if !ok || v.varType != varTypeFloat {
+		return 0, false
+	}
+	return readFloat32(r.base, r.dataBase+int(v.dataOffset)), true
+}
+
+func (r scalarReader) i32(name string) (int32, bool) {
+	v, ok := r.vars[name]
+	if !ok || (v.varType != varTypeInt && v.varType != varTypeBitfield) {
+		return 0, false
+	}
+	return readInt32(r.base, r.dataBase+int(v.dataOffset)), true
+}
+
+func (r scalarReader) boolean(name string) (bool, bool) {
+	v, ok := r.vars[name]
+	if !ok || v.varType != varTypeBool {
+		return false, false
+	}
+	return *(*byte)(unsafe.Add(r.base, r.dataBase+int(v.dataOffset))) != 0, true
+}
+
+func (r scalarReader) f32p(name string) *float32 {
+	if v, ok := r.f32(name); ok {
+		return &v
+	}
+	return nil
+}
+
+func (r scalarReader) i32p(name string) *int32 {
+	if v, ok := r.i32(name); ok {
+		return &v
+	}
+	return nil
+}
+
+func (r scalarReader) boolp(name string) *bool {
+	if v, ok := r.boolean(name); ok {
+		return &v
+	}
+	return nil
+}
+
+// delta reads one LapDeltaTo<ref> channel with its _DD and _OK companions.
+func (r scalarReader) delta(name string) LapDelta {
+	secs, _ := r.f32(name)
+	rate, _ := r.f32(name + "_DD")
+	ok, _ := r.boolean(name + "_OK")
+	return LapDelta{Seconds: secs, Rate: rate, Valid: ok}
+}
+
+// readPlayerScalars fills the player-car timing, fuel and weather fields.
+func readPlayerScalars(ld *LiveData, r scalarReader) {
+	ld.SessionNum, _ = r.i32("SessionNum")
+	ld.SessionUniqueID, _ = r.i32("SessionUniqueID")
+	ld.LapCompleted, _ = r.i32("LapCompleted")
+	ld.IsOnTrack, _ = r.boolean("IsOnTrack")
+	ld.OnPitRoad, _ = r.boolean("OnPitRoad")
+
+	ld.Lap.Current, _ = r.f32("LapCurrentLapTime")
+	ld.Lap.Last, _ = r.f32("LapLastLapTime")
+	ld.Lap.Best, _ = r.f32("LapBestLapTime")
+	ld.Lap.BestLapNum, _ = r.i32("LapBestLap")
+	ld.Lap.ToBest = r.delta("LapDeltaToBestLap")
+	ld.Lap.ToOptimal = r.delta("LapDeltaToOptimalLap")
+	ld.Lap.ToSessionBest = r.delta("LapDeltaToSessionBestLap")
+	ld.Lap.ToSessionOptimal = r.delta("LapDeltaToSessionOptimalLap")
+	ld.Lap.ToLast = r.delta("LapDeltaToSessionLastlLap")
+
+	ld.Fuel.Litres, ld.Fuel.Available = r.f32("FuelLevel")
+	ld.Fuel.Pct, _ = r.f32("FuelLevelPct")
+	ld.Fuel.UsePerHourKg, _ = r.f32("FuelUsePerHour")
+
+	ld.Conditions = Conditions{
+		AirTempC:      r.f32p("AirTemp"),
+		TrackTempC:    r.f32p("TrackTempCrew"),
+		Humidity:      r.f32p("RelativeHumidity"),
+		WindMS:        r.f32p("WindVel"),
+		WindDirRad:    r.f32p("WindDir"),
+		AirPressurePa: r.f32p("AirPressure"),
+		AirDensity:    r.f32p("AirDensity"),
+		FogLevel:      r.f32p("FogLevel"),
+		Precipitation: r.f32p("Precipitation"),
+		Skies:         r.i32p("Skies"),
+		TrackWetness:  r.i32p("TrackWetness"),
+		DeclaredWet:   r.boolp("WeatherDeclaredWet"),
+	}
 }

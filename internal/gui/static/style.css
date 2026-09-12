@@ -182,12 +182,13 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* Live panel */
 .live-hero { display: flex; gap: 28px; flex-wrap: wrap; margin: 12px 0 18px; }
+.live-section { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 4px; }
+.live-section h3 { margin: 10px 0 0; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.var { color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .stat { min-width: 90px; }
 .stat .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .stat .value { font-family: var(--mono); font-size: 26px; line-height: 1.2; }
-.gap-row { display: flex; align-items: baseline; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
-.gap-row .who { flex: 1; }
-.gap-row .delta { font-family: var(--mono); font-size: 20px; }
+.stat .var { color: var(--muted); font-family: var(--mono); font-size: 10px; opacity: 0.75; }
 
 .progress-track { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
 .progress-fill { height: 100%; background: var(--accent); }

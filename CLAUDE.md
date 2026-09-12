@@ -162,7 +162,7 @@ Each package has its own README with full detail. Below is a terse summary with 
 | `internal/trackmap` | GPS curvature corner detection (`latlon`) with steering/speed/lat-G validation; fallback `lataccel`; `trackmap.json` load/save | [README](internal/trackmap/README.md) |
 | `internal/pb` | Personal best store; `pb.Update` returns true on new PB; `PBPhase` stores per-segment data for delta comparison | [README](internal/pb/README.md) |
 | `internal/notes` | `Note{Timestamp,Text}`/`Session` types; `AppendNote` load→append→save | [README](internal/notes/README.md) |
-| `internal/iracing` | `ReadLiveData()` snapshot from iRacing shared memory (Windows-only); `ParseDrivers`, `ComputeGaps` for gap-to-car math (cross-platform) | [README](internal/iracing/README.md) |
+| `internal/iracing` | `ReadLiveData()` snapshot from iRacing shared memory (Windows-only), including player lap timing, fuel and weather; `ParseDrivers`, `ComputeGaps` for gap-to-car math, `FuelTracker` for live per-lap burn (cross-platform) | [README](internal/iracing/README.md) |
 | `internal/audio` | WinMM `Recorder.Start/Stop`; `BuildWAV` for Whisper input | [README](internal/audio/README.md) |
 | `internal/camera` | `Restarter` interface; Windows impl stops/starts `FrameServer`+`FrameServerMonitor` via raw SCM syscalls to un-stick a frozen webcam | [README](internal/camera/README.md) |
 | `internal/usbdev` | `Controller` interface; identifies sim-racing USB devices by VID/PID and enables/disables them via raw SetupAPI syscalls | [README](internal/usbdev/README.md) |
@@ -319,7 +319,7 @@ Toggle model — each press starts or stops recording:
 `notes set-hotkey` installs a keyboard hook and Raw Input listener simultaneously; first input wins and is saved to config. HID button-release events are discarded (toggle only cares about press).
 
 ### live subcommand flow (`cmd/motorhome/live.go`)
-Reads an iRacing shared-memory snapshot via `iracing.ReadLiveData()` and prints your position, lap, and gap in seconds to the car directly ahead/behind on track. Default mode prints one frame and exits. `-watch` polls at `-hz` Hz (default 5, clamped 1–60) and prints one summary line per tick until Ctrl-C. `-raw` dumps every field of `LiveData` plus per-car detail for each valid CarIdx — use this when the formatted view looks wrong. Gap computation lives in `internal/iracing/gap.go` (`ComputeGaps`); driver-name lookup uses the `Drivers` map parsed from the session YAML. Solo practice sessions with no other cars show `Ahead/Behind: (none)` by design. Windows-only (`//go:build windows`).
+Reads an iRacing shared-memory snapshot via `iracing.ReadLiveData()` and prints your position, lap, and gap in seconds to the car directly ahead/behind on track. Default mode prints one frame and exits. `-watch` polls at `-hz` Hz (default 5, clamped 1–60) and prints one summary line per tick until Ctrl-C. `-raw` dumps every field of `LiveData` — including lap times, deltas with their `_OK` flags, fuel and weather, with `n/a` for a variable the build does not publish — plus per-car detail for each valid CarIdx. Use it when the formatted view or the GUI's live panel looks wrong. Gap computation lives in `internal/iracing/gap.go` (`ComputeGaps`); driver-name lookup uses the `Drivers` map parsed from the session YAML. Solo practice sessions with no other cars show `Ahead/Behind: (none)` by design. Windows-only (`//go:build windows`).
 
 ### camera subcommand flow (`cmd/motorhome/camera.go`)
 Restarts a stuck/frozen webcam by stopping (if running) and restarting the Windows `FrameServer`/`FrameServerMonitor` services — the shared pipeline every app uses to access a camera — rather than disabling/enabling the USB PnP device itself. This was a deliberate fallback: `Disable-PnpDevice`/`Enable-PnpDevice` and `pnputil` both require a genuine administrator token, which `motorhome.exe` does not have in normal (Stream Deck-launched) use, and `runas` elevation was believed not to work in this environment. **That belief was wrong** — `usb` (added 2026-08-26) elevates silently via `ShellExecuteExW runas`, so a PnP disable/enable *would* have been available to `camera` after all. The service-restart approach is kept because it works, is narrower in what it touches, and needs no elevation at all; but the stated rationale no longer holds and shouldn't be reused as a reason to avoid elevation elsewhere. Restarting the two named services only needs `SERVICE_START`/`SERVICE_STOP` rights on those specific services, which — like `SeDebugPrivilege` for `Kill()` — can be granted to the account directly via a one-time `sc sdset` ACL change (see [internal/camera/README.md](internal/camera/README.md)) instead of requiring full admin membership. Implementation is raw `advapi32.dll` Service Control Manager calls (`OpenSCManagerW`/`OpenServiceW`/`ControlService`/`StartServiceW`), matching the no-external-dependency style of `internal/launcher`. Windows-only (`//go:build windows`).
@@ -496,7 +496,7 @@ Why this matters: iRacing's track-limits enforcement is lenient — a driver who
 
 Serves the web interface on `127.0.0.1` and opens a browser. Five panels: rig
 control (apps + USB + camera + transducer), settings, session analysis, live
-gaps, personal bests. Full detail in [internal/gui/README.md](internal/gui/README.md).
+telemetry, personal bests. Full detail in [internal/gui/README.md](internal/gui/README.md).
 
 **The transducer panel runs in-process, unlike the USB one.** `usb on|off` goes
 through `RunSubcommand` because it needs an elevated token; the shaker does not,
@@ -569,10 +569,29 @@ there is one place where that has to be right. Enumeration stays in-process.
 **`internal/gui` is cross-platform.** Shared memory, SetupAPI and the service
 control manager arrive through `Deps` as interfaces, wired in by
 `cmd/motorhome/gui_windows.go`. A nil provider answers **501**, so the page can
-tell "this build cannot do that" from "no such route". The live snapshot is built
-by calling `gapsFromLive` — the helper `live.go` already uses — rather than
-recomputing which car is ahead, so the browser and the terminal cannot disagree
-about the same moment.
+tell "this build cannot do that" from "no such route". Position and lap in the
+live snapshot come from the helpers `live.go` already uses, so the browser and
+the terminal cannot disagree about them.
+
+**The live panel is a survey of what the sim publishes, not a race HUD.** It
+shows position, lap timing and the five `LapDeltaTo*` channels, fuel, and S/F
+weather — and, since 2026-09-12, **not** the cars ahead and behind (`motorhome
+live` still prints those). Its purpose is to find which shared-memory values are
+worth building future dashboard elements on, so every value is captioned with
+the iRacing variable it came from, and server-computed ones say `derived from …`.
+Three rules follow from that and are tested: an unpublished variable is absent
+from the JSON rather than zero (`0 °C` is weather); a delta travels with its
+`_OK` flag, because iRacing publishes a number with nothing to compare against;
+and unit conversion happens in the shim, never the page.
+
+**The fuel estimate is stateful.** `liveProvider` is a pointer holding an
+`iracing.FuelTracker` for the server's lifetime, fed by every snapshot. Burn is
+the `FuelLevel` difference between observed lap boundaries (never integrated
+`FuelUsePerHour` — the `ComputeFuel` rule), over the last 5 measured laps, with
+worst lap reported beside the average. A lap is discarded unless it was watched
+line to line with no pit road, refuel, counter jump, invalid sample, or >3 s gap
+in `SessionTime`; a session change clears history. Discarding is the safe
+direction — it only delays the first estimate.
 
 `LiveSnapshot` splits `Message` (plain reason) from `Detail` (the Win32
 diagnostic). `live` prints the diagnostic as its whole message, which is right
@@ -652,6 +671,8 @@ All live next to the binary in `G:\RACING\SimAppLauncher\`:
 - `gui` serves one user on one machine by design (loopback only, no auth). Reaching it from a phone or tablet would need a bind-address change *and* something in front of it — the guard is not a login
 - `gui` has no `coach` panel. The coach brief is written to be pasted into an AI assistant, and a browser is not where that happens; `motorhome coach` remains the way to get one
 - A `gui` analysis holds the request for as long as the analysis takes (a few seconds on a 45 MB `.ibt`) with only a spinner. There is no progress reporting — the analyze subcommand has no progress to report
+- The `gui` live panel's fuel estimate only covers laps streamed while the panel was open, and lives in server memory — closing the panel mid-lap discards that lap, and restarting `gui` starts the estimate from nothing. Recording a burn history independent of the browser would need a background sampler, which the panel's "costs nothing while hidden" design deliberately avoids
+- The `gui` live panel reads `WindDir` as-is; iRacing does not document whether it is the direction the wind blows from or towards, so the page labels it neutrally
 - The `gui` transducer panel holds its HTTP request for the whole ramp and reports only at the end, so the browser shows "ramping up" rather than the current step. Per-step progress would need SSE like the live panel; the ramp is a few seconds, and the Stop button works throughout regardless
 - `gui` state changes have no undo. Disabling the wrong USB device or removing an app from the settings form is recoverable, but only by doing the opposite
 - The settings form does not browse the filesystem — paths are typed. A file picker would need either an upload control (wrong: it copies the file) or a server-side directory browser (a filesystem-listing endpoint on a machine-local server, which is more surface than the feature is worth)

@@ -889,25 +889,39 @@ func TestCameraUnavailableOffWindows(t *testing.T) {
 /* ── live ──────────────────────────────────────────────────────────── */
 
 func TestLiveSnapshot(t *testing.T) {
+	air := float32(27.2)
 	snap := LiveSnapshot{
 		Connected: true, Track: "Watkins Glen", Car: "Porsche 718",
 		Position: 3, FieldSize: 20, Lap: 7, LapDistPct: 0.42,
-		Ahead: &LiveGap{DriverName: "Someone", TimeSeconds: 1.25},
+		Timing: &LiveTiming{
+			CurrentLap: 55.0, LastLap: 108.0, BestLap: 107.5,
+			Deltas: []LiveDelta{{Ref: "best", Seconds: -0.25, Rate: 0.05, Valid: true}},
+		},
+		Fuel:       &LiveFuel{Litres: 20.75, MeasuredLaps: 2, PerLapAverage: 2.4},
+		Conditions: &LiveConditions{AirTempC: &air, Skies: "Partly cloudy"},
 	}
 	s, _, _ := testServer(t, func(d *Deps) { d.Live = fakeLive{snap: snap} })
 
-	got := decode[LiveSnapshot](t, do(t, s, "GET", "/api/live", ""))
+	w := do(t, s, "GET", "/api/live", "")
+	got := decode[LiveSnapshot](t, w)
 
 	if !got.Connected || got.Track != "Watkins Glen" || got.Position != 3 {
 		t.Fatalf("snapshot = %+v", got)
 	}
-	if got.Ahead == nil || got.Ahead.TimeSeconds != 1.25 {
-		t.Errorf("ahead = %+v", got.Ahead)
+	if got.Timing == nil || len(got.Timing.Deltas) != 1 || !got.Timing.Deltas[0].Valid ||
+		got.Timing.Deltas[0].Seconds != -0.25 {
+		t.Errorf("timing = %+v", got.Timing)
 	}
-	// Nobody behind must arrive as null, not as a zero-second gap to a
-	// nonexistent car — a solo session is not a car alongside.
-	if got.Behind != nil {
-		t.Errorf("behind = %+v, want null", got.Behind)
+	if got.Fuel == nil || got.Fuel.Litres != 20.75 || got.Fuel.MeasuredLaps != 2 {
+		t.Errorf("fuel = %+v", got.Fuel)
+	}
+	if got.Conditions == nil || got.Conditions.AirTempC == nil || *got.Conditions.AirTempC != air {
+		t.Errorf("conditions = %+v", got.Conditions)
+	}
+	// A variable the build did not publish must be absent from the document,
+	// not a zero reading: 0 °C and "no rain" are real weather.
+	if strings.Contains(w.Body.String(), "trackTempC") || strings.Contains(w.Body.String(), "precipitation") {
+		t.Errorf("unpublished conditions leaked into the JSON: %s", w.Body.String())
 	}
 }
 

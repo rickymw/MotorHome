@@ -294,6 +294,30 @@ func printSnapshotVerbose(ld iracing.LiveData) {
 	fmt.Printf("LapDistPct   : %.4f\n", ld.LapDistPct)
 	fmt.Printf("Track        : %q\n", ld.Track)
 	fmt.Printf("Car          : %q\n", ld.Car)
+	fmt.Printf("Session      : num=%d uid=%d  LapCompleted=%d  IsOnTrack=%v  OnPitRoad=%v\n",
+		ld.SessionNum, ld.SessionUniqueID, ld.LapCompleted, ld.IsOnTrack, ld.OnPitRoad)
+	fmt.Printf("Lap times    : current=%.3f last=%.3f best=%.3f (lap %d)\n",
+		ld.Lap.Current, ld.Lap.Last, ld.Lap.Best, ld.Lap.BestLapNum)
+	for _, d := range []struct {
+		name string
+		d    iracing.LapDelta
+	}{
+		{"ToBest", ld.Lap.ToBest},
+		{"ToOptimal", ld.Lap.ToOptimal},
+		{"ToSessionBest", ld.Lap.ToSessionBest},
+		{"ToSessionOptimal", ld.Lap.ToSessionOptimal},
+		{"ToLast", ld.Lap.ToLast},
+	} {
+		fmt.Printf("  %-16s: %+.3f s  rate=%+.4f s/s  ok=%v\n", d.name, d.d.Seconds, d.d.Rate, d.d.Valid)
+	}
+	fmt.Printf("Fuel         : available=%v %.2f l (%.1f%%)  %.2f kg/h\n",
+		ld.Fuel.Available, ld.Fuel.Litres, ld.Fuel.Pct*100, ld.Fuel.UsePerHourKg)
+	c := ld.Conditions
+	fmt.Printf("Conditions   : air=%s track=%s humidity=%s wind=%s dir=%s\n",
+		optF(c.AirTempC), optF(c.TrackTempC), optF(c.Humidity), optF(c.WindMS), optF(c.WindDirRad))
+	fmt.Printf("               pressure=%s density=%s fog=%s precip=%s skies=%s wetness=%s declaredWet=%s\n",
+		optF(c.AirPressurePa), optF(c.AirDensity), optF(c.FogLevel), optF(c.Precipitation),
+		optI(c.Skies), optI(c.TrackWetness), optB(c.DeclaredWet))
 	fmt.Printf("MyCarIdx     : %d\n", ld.MyCarIdx)
 	fmt.Printf("Drivers      : %d entries\n", len(ld.Drivers))
 	for idx, d := range ld.Drivers {
@@ -336,4 +360,27 @@ func printSnapshotCompact(ld iracing.LiveData) {
 		detail = fmt.Sprintf("%s / %s", ld.Track, ld.Car)
 	}
 	fmt.Printf("  %s     %12.3f  %10.4f  %s\n", conn, ld.SessionTime, ld.LapDistPct, detail)
+}
+
+// optF, optI and optB render an optional shared-memory value for -raw, where
+// "not published by this build" has to stay distinguishable from zero.
+func optF(v *float32) string {
+	if v == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.4g", *v)
+}
+
+func optI(v *int32) string {
+	if v == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%d", *v)
+}
+
+func optB(v *bool) string {
+	if v == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%v", *v)
 }

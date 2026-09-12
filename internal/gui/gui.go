@@ -74,11 +74,11 @@ type ShakerProvider interface {
 	Stop()
 }
 
-// LiveProvider returns a snapshot of the iRacing session. The gap and position
-// computation happens on the caller's side of this interface so that this
-// package does not have to reach into Windows-only shared-memory code; the
-// Windows shim builds the snapshot from the same helpers the `live` subcommand
-// uses, so the two views cannot disagree.
+// LiveProvider returns a snapshot of the iRacing session. Reading shared
+// memory, decoding the SDK's enums and tracking fuel across laps all happen on
+// the caller's side of this interface, so this package does not have to reach
+// into Windows-only code; the Windows shim builds position and lap from the
+// same helpers the `live` subcommand uses, so the two views cannot disagree.
 type LiveProvider interface {
 	Snapshot() LiveSnapshot
 }
