@@ -73,7 +73,10 @@ type Phase struct {
 //
 // brakeEntries provides the stored brake onset positions (keyed by segment name)
 // used to set effective segment entry points. Pass nil or an empty map to use
-// geometric entry points only.
+// geometric entry points only. An onset that would place a corner's start inside
+// the corner before it is clamped away (see clampEffEntries) — extending a
+// corner back through a preceding straight is the point, extending it back into
+// a preceding corner is a detection failure.
 //
 // Corners with peak steering < 5° are treated as straights (single full phase).
 // Phases with 0 samples are omitted from the result.
@@ -92,6 +95,7 @@ func ComputePhases(lap *Lap, segs []trackmap.Segment, brakeEntries pb.BrakeEntry
 		effEntry[i] = effectiveSegEntry(seg, brakeEntries)
 		effExit[i] = seg.ExitPct
 	}
+	clampEffEntries(segs, effEntry)
 	for i := 0; i < len(segs)-1; i++ {
 		if effEntry[i+1] < effExit[i] {
 			effExit[i] = effEntry[i+1]

@@ -1069,13 +1069,19 @@ func TestExtractLaps_LaggedLLT_MultipleLaps(t *testing.T) {
 	const N = 320
 	t0 := func(n int) float64 { return float64(n) / 60.0 }
 
+	// Every published time here sits within maxOfficialTimeDeviation of the
+	// laps' own sample span (N-1 frames at 60 Hz ≈ 5.317s), so the plausibility
+	// check accepts them all and what this test exercises stays the lag logic.
+	// stalePrev in particular has to be plausible: the point is that the lag
+	// logic never attributes it to a lap, not that it fails a magnitude check.
+	//
 	// Stale LLT from a prior recording session.
-	const stalePrev float32 = 101.983
-	// Real per-lap times (published one lap late by iRacing).
-	const lapATime float32 = 91.420 // valid but invalidated by track limits → published as -1
-	const lapBTime float32 = 90.427
-	const lapCTime float32 = 90.322
-	const lapDTime float32 = 89.992
+	const stalePrev float32 = 5.500
+	// Real per-lap times (published one lap late by iRacing). D is the fastest.
+	const lapATime float32 = 5.450 // valid but invalidated by track limits → published as -1
+	const lapBTime float32 = 5.420
+	const lapCTime float32 = 5.380
+	const lapDTime float32 = 5.340
 
 	lapA := makeLapSamples(N, 0.01, 0.99, 30, t0(0))
 	lapB := makeLapSamples(N, 0.01, 0.99, 30, t0(N))

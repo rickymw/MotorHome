@@ -352,14 +352,49 @@ const pitSpeedThreshold = float32(5.0)
 // IsPartialStart flags laps where recording began mid-lap; those are excluded
 // from best-lap selection.
 type Lap struct {
-	Number           int
-	LapTime          float32 // seconds: official (LapLastLapTime) or SessionTime diff
-	OfficialLapTime  float32 // LapLastLapTime captured during the following lap; 0 if absent
-	Kind             LapKind
-	StartSessionTime float64 // SessionTime of first sample (for timeAtPct)
-	IsPartialStart   bool    // true if recording started mid-lap (DistPct > 0.05)
-	IsCut            bool    // true if LapDistPct coverage has gaps suggesting a track cut
-	Samples          []SampleData
+	Number               int
+	LapTime              float32 // seconds: official (LapLastLapTime) or SessionTime diff
+	OfficialLapTime      float32 // LapLastLapTime captured during the following lap; 0 if absent
+	RejectedOfficialTime float32 // LapLastLapTime discarded as implausible; 0 if none
+	Kind                 LapKind
+	StartSessionTime     float64 // SessionTime of first sample (for timeAtPct)
+	IsPartialStart       bool    // true if recording started mid-lap (DistPct > 0.05)
+	IsCut                bool    // true if LapDistPct coverage has gaps suggesting a track cut
+	Samples              []SampleData
+}
+
+// maxOfficialTimeDeviation is how far LapLastLapTime may sit from a lap's own
+// sample span before the published value is rejected.
+//
+// The span runs first sample to last, so it undercounts the true lap by the
+// fractions either side of the S/F crossing — at 60 Hz, under 0.04s. Half a
+// second allows thirty dropped frames on top of that and still catches the real
+// failure by a wide margin: a real session published 1:57.032 for a lap whose
+// samples and sector times both said 1:50.97.
+const maxOfficialTimeDeviation = float32(0.5)
+
+// officialTimePlausible reports whether a published LapLastLapTime can describe
+// this lap, by checking it against the duration of the lap's own samples.
+//
+// iRacing occasionally publishes a lap time that belongs to a different stretch
+// of running — after a session reset, a recording gap, or a tow. Taking it at
+// face value is worse than having no official time at all: the lap list, the
+// consistency spread and any "you were N seconds off" all inherit the error,
+// and nothing downstream can tell the value is wrong. The sample span is the
+// one number that cannot lie about how long the car took, so it is what the
+// published value has to agree with.
+//
+// A lap with too few samples to have a meaningful span is trusted rather than
+// second-guessed — there is nothing to check against.
+func officialTimePlausible(lap *Lap, official float32) bool {
+	if len(lap.Samples) < MinSamplesForValidLap {
+		return true
+	}
+	span := float32(lap.Samples[len(lap.Samples)-1].SessionTime - lap.Samples[0].SessionTime)
+	if span <= 0 {
+		return true
+	}
+	return abs32(official-span) <= maxOfficialTimeDeviation
 }
 
 // sfDropThreshold is the minimum backward DistPct change that signals an S/F crossing.
@@ -424,8 +459,13 @@ func ExtractLaps(f *ibt.File) ([]Lap, error) {
 		// LLT update — applies to the most recently finalized lap.
 		if lt, ok := s.Float32("LapLastLapTime"); ok {
 			if hasPrevLLT && lt != prevLLT && lt > 0 && len(laps) > 0 {
-				laps[len(laps)-1].OfficialLapTime = lt
-				laps[len(laps)-1].LapTime = lt
+				prev := &laps[len(laps)-1]
+				if officialTimePlausible(prev, lt) {
+					prev.OfficialLapTime = lt
+					prev.LapTime = lt
+				} else {
+					prev.RejectedOfficialTime = lt
+				}
 			}
 			prevLLT = lt
 			hasPrevLLT = true

@@ -451,6 +451,15 @@ Crossing times are linearly interpolated between samples (see `internal/analysis
 `Name | Phase | Spd (entry→exit km/h) | OnBrk | PkBrk | Thr% | LatG | Wheel° | Corr | ABS | Lock | Spin | Coast`
 — Phase = entry/mid/exit/full. Straights get one "full" phase. Corners are split into entry/mid/exit using 80% of peak |SteeringAngle| as the commitment threshold. Corners with peak steering < 5° get a single "full" phase. Spd = entry and exit speed in km/h. OnBrk = % of phase time with brake applied (>2%). PkBrk = peak brake pressure. Thr% = samples at full throttle > 95%. LatG = mean abs(LatAccel)/9.81. Wheel° = peak absolute steering wheel angle in the phase (degrees; steering wheel, not road wheel — divide by steering ratio for tyre angle). Corr = steering direction reversals above threshold within the phase. ABS = samples with ABS active. Lock = samples where any wheel speed < 95% of vehicle speed under braking. Spin = samples where any wheel speed > 105% of vehicle speed under power. Coast = seconds (CoastSamples / 60).
 
+### Segment spans and the brake-entry floor
+A corner's phase rows do not cover its geometric span. `ComputePhases` moves each corner's start back to its stored brake onset (`pb.json` → `brakeEntries`) so the braking zone is charged to the corner it was for, and clamps the previous segment's exit to match.
+
+**That extension may cross a preceding straight; it may never enter a preceding corner** (`brakeScanFloor`, enforced in both `ComputeBrakeEntries` at detection time and `clampEffEntries` at read time). Two corners linked by one continuous brake application otherwise let the detector walk back past the earlier corner's entry and call that the later corner's onset. The damage is silent and compounds through the exit clamp: samples move from the earlier corner to the later one, and if the clamp lands before the earlier corner's steering unwinds, **that corner emits no exit phase at all**. Seen at Okayama — T2's onset sat inside T1, T7's inside T6, T6 published entry and mid only, and ~6s of T1's samples were charged to T2. Total coast/lockup/wheelspin counts are unchanged by the fix; only the attribution moves.
+
+The read-time clamp exists because `pb.json` entries written before the guard are not rewritten until that car/track sets a new PB. It skips segment 0, whose predecessor is the last segment of the lap: comparing across the S/F wrap would take the last segment's exit of 1.0 as a floor and push segment 0's entry to the end of the lap.
+
+`segmentEffBounds` (dumps, traces, note placement) uses geometric entries instead — a dump is meant to show the raw approach to a corner. So a dump's span and a phase row's span for the same segment legitimately differ, and comparing the two is not a bug report.
+
 ### vs PB delta table
 `Name | Phase | dSpd | dBrk | dPkBr | dThr | dLatG | dCorr | dABS | dLck | dSpn | dCoast`
 — Shown after the phase table when stored PB phases exist. Each value is `current − PB`. Positive speed = faster than PB. Positive brake/coast/error counts = more than PB (usually worse). Phases are matched by segment name + phase kind; unmatched phases (e.g. track map changed) are skipped. Stored in `pb.json` as `phases` array inside `PersonalBest`.
@@ -467,6 +476,10 @@ iRacing's carcass-temp channels (`*tempCL/CM/CR`) were tried first but found to 
 
 ### Lap timing
 `LapLastLapTime` is the authoritative lap time and matches the iRacing UI / Garage61. iRacing publishes it 0.1–1s *after* the S/F crossing (at the crossing frame itself the channel still holds the previous lap's value), so `ExtractLaps` tracks LLT across samples and applies each new positive value to the most recently finalized lap. The final lap of a recording, invalidated laps (LLT=-1), and recordings with no LLT channel fall back to `SessionTime[last] − SessionTime[first]`.
+
+**Authoritative, but not unconditionally.** `officialTimePlausible` rejects a published time more than `maxOfficialTimeDeviation` (0.5s) from the lap's own sample span; the lap keeps its measured time and the discarded value is preserved in `RejectedOfficialTime`. iRacing sometimes publishes a time belonging to a different stretch of running — a real Okayama session reported 1:57.032 for a lap whose samples *and* sector times both said 1:50.95, which made a 1.1s-slower lap look 7.1s slower and turned every consistency SD into a comparison against a phantom. The sample span is the one number that cannot lie about how long the car took, so it is the check; 0.5s covers the sub-0.04s of S/F fractions the span misses plus thirty dropped frames. Laps below `MinSamplesForValidLap` are trusted — there is nothing to check against.
+
+`warnRejectedLapTimes` (`analyze_helpers.go`) prints both times to stderr. Substituting silently would leave the user with a lap time in the iRacing UI that this tool contradicts, and no way to find out why.
 
 ### Out/in lap detection
 Out lap: first sample speed < 5 m/s. In lap: last sample speed < 5 m/s. Shown in lap list; excluded from best-lap selection unless forced with `-lap N`.
@@ -608,6 +621,9 @@ All live next to the binary in `G:\RACING\SimAppLauncher\`:
 - Confirmed empirically (2026-07-28) that the process running `motorhome.exe` normally does **not** hold a full administrator token: `Disable-PnpDevice`/`pnputil /disable-device` both fail with access-denied against a real device. Only specific, narrowly-grantable privileges/rights (like `SeDebugPrivilege`, or the `camera` subcommand's service ACL) work *without* elevation — don't assume a feature needing genuine admin rights will work in-process without first checking. What has changed since that note is the escape hatch: a feature that genuinely needs admin can re-exec itself elevated (see `usb`), so "needs admin" is no longer a reason to abandon an approach here — it only means the work has to happen in a child process
 
 ## Known limitations
+- A lap whose published `LapLastLapTime` is rejected prints a **different time than the iRacing UI and Garage61 show** for that lap. That is the point — the published value was wrong — but the warning is the only thing tying the two together, so it must not be demoted or suppressed
+- The brake-entry floor is not applied to segment 0 at read time (the S/F wrap makes the comparison meaningless). A first-segment onset that wraps is bounded at detection time only, so a `pb.json` written before that guard could still carry a bad onset for the first segment until that car/track sets a new PB
+- `clampEffEntries` repairs a bad stored onset in memory on every run but never rewrites `pb.json`, so the corrupt value stays on disk. Harmless while every reader clamps, but a new reader that forgets to would reintroduce the bug
 - `Minimized` window style not implemented (requires `golang.org/x/sys/windows` for `StartupInfo`; currently treated as `Normal`)
 - `stop` kills by image name — affects all instances of a process if multiple are running
 - `camera` restarts the Frame Server system-wide (not scoped to one device) and cannot fix a true USB-level hardware hang — only a full PnP disable/enable or physical unplug/replug can, which requires admin rights not available in this deployment

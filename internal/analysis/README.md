@@ -17,6 +17,10 @@ Extracts per-lap statistics from iRacing `.ibt` telemetry samples.
 
 **Lap timing:** iRacing publishes `LapLastLapTime` 0.1–1 second *after* the S/F crossing — at the crossing frame itself the channel still holds the previous lap's value (or `-1` for an invalidated lap). `ExtractLaps` therefore tracks LLT across samples; when it changes to a new positive value, that value is the official time of the most recently finalized lap and is stored as `OfficialLapTime` / `LapTime`. This matches the time shown in iRacing and third-party tools like Garage61.
 
+**A published time must agree with the lap's own samples** (`officialTimePlausible`). iRacing occasionally publishes a time belonging to a different stretch of running — after a session reset, a recording gap, or a tow. The sample span (first to last `SessionTime`) cannot lie about how long the car took, so it is what the published value is checked against; more than `maxOfficialTimeDeviation` (0.5 s) apart and the published value is discarded into `RejectedOfficialTime` and the lap falls back to its measured span. The span undercounts the true lap by the fractions either side of the S/F crossing — under 0.04 s at 60 Hz — so the tolerance also allows thirty dropped frames. Observed on a real Okayama session that published 1:57.032 for a lap whose samples *and* sector times both said 1:50.95. Laps below `MinSamplesForValidLap` are trusted rather than second-guessed: there is nothing meaningful to check against.
+
+A rejection is never silent — `cmd/motorhome` warns on stderr with both the rejected and the measured time, because the user has a lap time in the iRacing UI and in Garage61 that will no longer match what this tool prints.
+
 Consequences:
 - The final lap of a recording has no following lap to source LLT from, so it always falls back to `SessionTime[last] − SessionTime[first]` (within ~33 ms of the official time).
 - Invalidated laps (track-limits violations) yield `LLT=-1` in iRacing, which is treated as missing — those laps also fall back to the SessionTime diff.
@@ -29,6 +33,12 @@ Out/in lap classification uses entry/exit speed: < 5 m/s at the first sample = o
 ### Brake entry detection (`zones.go`)
 
 `ComputeBrakeEntries` scans flying laps backward from each corner's geometric entry to find the average point where brake pressure first exceeds 5%. A tolerance of 3 consecutive non-braking samples prevents ABS modulation from terminating the scan early. For the first corner (T1), the scan wraps around the S/F line to detect braking zones that start on the preceding straight (high LapDistPct near 1.0).
+
+**The scan may walk back through a preceding straight, never into a preceding corner** (`brakeScanFloor`). Linked corners share one continuous brake application, so an unbounded scan follows it back past the earlier corner's entry and reports the tail of *that* corner's braking as this corner's onset. Because `ComputePhases` then clamps each segment's exit to the next segment's effective entry, the consequences are silent and compounding: samples move from the earlier corner to the later one, and if the clamp lands before the earlier corner's steering unwinds, that corner loses its **exit phase entirely**. Observed at Okayama, where T2's stored onset sat inside T1 and T7's sat inside T6 — T6 published no exit row at all, and roughly 6 s of T1's samples were charged to T2.
+
+`clampEffEntries` applies the same rule again at read time, in `ComputePhases`. `pb.json` files written before the detection guard existed still carry onsets that violate it, and they are not rewritten until that car/track sets a new personal best. Segment 0 is skipped: its predecessor is the last segment of the lap, so the comparison would cross the S/F wrap, where the last segment's exit of 1.0 would push segment 0's entry to the end of the lap.
+
+Dumps and traces (`segmentEffBounds`) deliberately use geometric entries instead, so a dump shows the raw approach to a corner. That means a dump's span and a phase row's span for the same segment legitimately differ.
 
 ### Phase analysis (`phases.go`)
 
@@ -128,7 +138,7 @@ Notes falling outside the recording come back with `Located == false` and keep t
 | Symbol | Description |
 |---|---|
 | `SampleData` | ~60 telemetry channels per sample: timing, driver inputs (raw & processed), dynamics, driver aids, wheel speeds, tyre temps/wear/pressure, brake line pressures, fuel, steering torque. |
-| `Lap` | One lap: number, time (`LapLastLapTime` preferred; SessionTime diff fallback), kind, `OfficialLapTime`, `IsPartialStart` and `IsCut` flags, and `[]SampleData`. |
+| `Lap` | One lap: number, time (`LapLastLapTime` preferred; SessionTime diff fallback), kind, `OfficialLapTime`, `RejectedOfficialTime`, `IsPartialStart` and `IsCut` flags, and `[]SampleData`. |
 | `LapKind` | `KindFlying`, `KindOutLap`, `KindInLap`, `KindOutInLap`. |
 | `Phase` | Per-phase stats: entry/exit/peak speed, brake%, peak brake, throttle%, avg lat G, peak steering angle, steering corrections, ABS, lockup/wheelspin, coast. |
 | `ExitImpact` | Corner exit speed paired with the peak speed reached on the following straight, for one lap. |

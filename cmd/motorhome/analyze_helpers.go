@@ -379,3 +379,27 @@ func formatMapLine(segCount int, existing *trackmap.TrackMap, geomConf trackmap.
 		existing.SessionsUsed, pluralize(existing.SessionsUsed, "session", "sessions"),
 		matchStr)
 }
+
+// warnRejectedLapTimes reports laps whose published LapLastLapTime was
+// discarded as implausible, naming both the rejected value and the time now in
+// use. It goes to stderr rather than the analyze sink so it still reaches the
+// user under -json without corrupting the document on stdout.
+//
+// Silently substituting the sample-derived time would be the wrong trade: the
+// substituted value is right, but the user has a lap time in the iRacing UI and
+// in Garage61 that no longer matches what this tool prints, and no way to find
+// out why.
+func warnRejectedLapTimes(laps []analysis.Lap) {
+	for i := range laps {
+		lap := &laps[i]
+		if lap.RejectedOfficialTime <= 0 {
+			continue
+		}
+		fmt.Fprintf(os.Stderr,
+			"Warning: lap %d reports %s, but its telemetry spans %s — using the measured time. "+
+				"iRacing published a lap time that does not describe this lap.\n",
+			lap.Number,
+			analysis.FormatLapTime(lap.RejectedOfficialTime),
+			analysis.FormatLapTime(lap.LapTime))
+	}
+}

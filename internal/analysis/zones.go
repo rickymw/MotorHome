@@ -206,6 +206,40 @@ func effectiveSegEntry(seg trackmap.Segment, brakeEntries pb.BrakeEntryMap) floa
 	return seg.EntryPct
 }
 
+// brakeScanFloor returns how far back a corner's braking zone may be taken.
+//
+// A corner's braking starts on the straight before it, so a preceding straight
+// may be consumed entirely — back to its own entry, which is prevEff. A
+// preceding *corner* may not be entered at all: two corners linked by one
+// continuous brake application would otherwise let the later corner claim the
+// earlier one's braking, and through the exit clamp in ComputePhases that both
+// moves samples between corners and can erase the earlier corner's exit phase.
+func brakeScanFloor(prev trackmap.Segment, prevEff float32) float32 {
+	if prev.Kind == trackmap.KindStraight {
+		return prevEff
+	}
+	return prev.ExitPct
+}
+
+// clampEffEntries bounds each effective segment entry by brakeScanFloor, so a
+// stored brake onset can never place a corner's start inside the corner before
+// it. ComputeBrakeEntries applies the same rule when detecting onsets; this
+// repeats it at read time because pb.json files written before that guard
+// existed still carry onsets that violate it, and those files are not rewritten
+// until the car/track sets a new personal best.
+// Segment 0 is skipped. Its predecessor is the last segment of the lap, so the
+// comparison would have to be made across the S/F wrap, where "earlier" has no
+// meaning in a 0–1 percentage: the last segment's exit is 1.0, which as a floor
+// would push segment 0's entry to the end of the lap. A first-segment onset that
+// wraps is bounded at detection time instead, by the same rule.
+func clampEffEntries(segs []trackmap.Segment, effEntry []float32) {
+	for i := 1; i < len(segs); i++ {
+		if floor := brakeScanFloor(segs[i-1], effEntry[i-1]); effEntry[i] < floor {
+			effEntry[i] = floor
+		}
+	}
+}
+
 // ComputeBrakeEntries scans flying laps to find the average braking onset
 // point before each corner/chicane segment. For each such segment it scans
 // backward from the geometric corner entry, looking for the start of the
@@ -230,16 +264,20 @@ func ComputeBrakeEntries(laps []Lap, segs []trackmap.Segment) pb.BrakeEntryMap {
 			continue
 		}
 
-		// How far back to look: the preceding segment's effective entry. This
-		// prevents the scan from crossing into an adjacent corner's braking zone.
-		// For the first segment (i==0), the preceding segment wraps around to the
-		// last segment, so minPct uses the last segment's entry.
-		var minPct float32
+		// How far back to look. Braking for a corner begins on the straight
+		// before it, so the scan may walk back through a preceding straight —
+		// but never into a preceding *corner*. Linked corners share one
+		// continuous brake application, and without this bound the scan follows
+		// it back into the earlier corner and reports the tail of that corner's
+		// braking as this corner's onset (see brakeScanFloor).
+		//
+		// For the first segment (i==0) the preceding segment wraps around to the
+		// last segment.
+		prev := len(segs) - 1
 		if i > 0 {
-			minPct = effEntry[i-1]
-		} else {
-			minPct = effEntry[len(segs)-1]
+			prev = i - 1
 		}
+		minPct := brakeScanFloor(segs[prev], effEntry[prev])
 
 		// wrapAround is true when the search region crosses the S/F line
 		// (i.e., the first corner's braking zone may start at pct > minPct near 1.0).

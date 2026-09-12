@@ -159,6 +159,7 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath, notesDir
 	if len(laps) == 0 {
 		analyzeDie("no samples found in file")
 	}
+	warnRejectedLapTimes(laps)
 
 	// Resolve the best lap now (needed for auto-detection even when not yet printing).
 	bestLap := bestAnalyzeLap(laps)

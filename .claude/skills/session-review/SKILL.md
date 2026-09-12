@@ -29,18 +29,19 @@ The setup lives in `pb.json` under the `"<Car>|<Track>"` key's `setup` field, as
 
 Telemetry lies in specific, repeatable ways. Run every check. Report what fails; say plainly which findings it weakens.
 
-**Lap times reconcile with sectors.** Sum each lap's sector times and compare to its reported lap time. A clean lap agrees within ~20 ms (boundaries are interpolated). A lap off by seconds has a bad `LapLastLapTime` — its displayed time is wrong, and any "you were N seconds slower" built on it is wrong too. Confirm against the sample count: `sum(sampleCount over all phases) / 60` is the lap's true duration.
+**Lap times reconcile with sectors.** Sum each lap's sector times and compare to its reported lap time; a clean lap agrees within ~20 ms. `sum(sampleCount over all phases) / 60` is the lap's true duration and settles any dispute.
+
+The tool now rejects a `LapLastLapTime` more than 0.5 s from the lap's sample span and warns on stderr with both values. **Read that warning out to the user** — their lap time in the iRacing UI and in Garage61 will not match what the tool prints, and the warning is the only thing connecting the two. Do the reconciliation anyway: it also catches sector data that is wrong for other reasons.
 
 **Out/in lap times are not real lap times.** If an out lap looks faster than the best flying lap, the recording started mid-lap. Check fuel: a lap that burned half what a flying lap burned covered half the track. Never quote a partial lap's time.
 
-**Brake-entry points can cascade.** `ComputePhases` moves each corner's start back to its stored brake-entry `pct` (`pb.json` → `brakeEntries`) and clamps the *previous* segment's exit to it. Compare every `brakeEntries[T].pct` against that corner's `entryPct` **and** the previous corner's span from `analyze -json`. Two symptoms of corruption:
+**Brake-entry points can cascade.** `ComputePhases` moves each corner's start back to its stored brake-entry `pct` (`pb.json` → `brakeEntries`) and clamps the *previous* segment's exit to it. An onset that lands inside the *previous corner* — linked corners sharing one continuous brake application — moves samples between corners and can erase the earlier corner's exit phase entirely.
 
-- A brake entry that lands *inside the previous corner* — linked corners with one continuous brake application, where the detector caught the tail of the first corner's braking. The earlier corner's samples get charged to the later one.
-- **A corner with no `exit` phase at all.** That means the next corner's brake entry swallowed it. Its exit data is in the next corner's rows.
+Both the detector and the reader now bound that extension at the previous corner's exit, so this should no longer occur. Verify rather than assume: **a corner with entry and mid but no `exit` row is the tell.** If you see one, compare `brakeEntries[T].pct` against the previous corner's span from `analyze -json`, and name the pair as a complex ("the T6/T7 complex") rather than attributing to one corner.
 
-Where this happens, name the pair as a complex ("the T6/T7 complex") rather than attributing to one corner. The *events* — lockups, wheelspin, coast — are real sample counts regardless of which segment they land in; only the attribution is soft.
+The *events* — lockups, wheelspin, coast — are real sample counts wherever they land. A correct fix redistributes them between segments and leaves the lap totals identical; if a total changes, something else moved.
 
-**Sanity-check segment spans.** `sampleCount / 60` should roughly equal `(exitM - entryM) / meanSpeed`. A big overshoot means the span was extended by the check above. A phase whose `peakSpeedKph` is well above both its entry and exit speed is spanning more than one corner.
+**Sanity-check segment spans.** `sampleCount / 60` should roughly equal `(exitM - entryM) / meanSpeed`. A phase whose `peakSpeedKph` is well above both its entry and exit speed is spanning more than one corner. Note that a corner's phase rows legitimately cover more than its geometric span — the brake onset extension is deliberate — while `-dump` and `-trace` use geometric entries, so the two disagreeing is by design, not a bug.
 
 **Small-N phases are noise.** Under ~20 samples (0.33 s) the percentage columns are meaningless. Say so rather than reporting "100% on brake" from 9 samples.
 
@@ -73,11 +74,23 @@ Note that `Lock` fires at 5% slip, which is near the optimal braking slip ratio 
 
 Name the corner, the phase, and the pedal. One sentence each.
 
+### Every recommendation carries a watch item
+
+A change the driver cannot evaluate is a change they will keep or discard at random. For **each** fix and **each** setup change, say — in one line — what to look for, **in which named corner**, and what would mean back it out:
+
+- **Where:** the specific corner the effect should show up in first, which is not always the corner the problem was measured in. A rotation change shows up wherever the driver currently carries the most lock; a braking change shows up at the heaviest stop.
+- **Look for:** what confirms it worked, ideally something they can feel *and* something the next run's telemetry will show (a phase row, a column, a direction of movement).
+- **Look out for:** the specific way it could go wrong, named as a feel in a named corner — that is the signal to revert.
+
+Give the telemetry check as a column and a direction, not a target number, unless the data supports one.
+
 ### Setup changes
 
-Up to three. **Only fields that appear in this car's `CarSetup:` YAML** — that block is the ground truth for what iRacing exposes on this car, and it differs enormously between cars (an MX-5 Cup has no brake bias; a GT car has ARB blades and a wing). Never suggest an adjustment that is not in the block.
+Up to three, and **recommending none is a valid answer.** Say so plainly when the data does not support a change: too few laps, tyres never up to temperature, or a problem that is plainly a technique problem wearing a setup problem's clothes. A driver who changes the car to fix their own brake release has to unwind two variables next session instead of one. When in doubt, fix the driving first and re-measure — say that, and say what would have to show up in the next run to justify touching the car.
 
-For each: the field, the current value, the direction, why the data points there, and the risk. Where a change trades one measured problem against another (helping rotation while the car is already spinning the rears), say so and make it conditional on the driver's answer.
+**Only fields that appear in this car's `CarSetup:` YAML** — that block is the ground truth for what iRacing exposes on this car, and it differs enormously between cars (an MX-5 Cup has no brake bias; a GT car has ARB blades and a wing). Never suggest an adjustment that is not in the block.
+
+For each: the field, the current value, the direction, why the data points there, the risk, and the watch item above. **One change at a time**, and say which to do first — two changes at once means neither is attributable. Where a change trades one measured problem against another (helping rotation while the car is already spinning the rears), say so and make it conditional on the driver's answer about feel.
 
 ## 5. Ask — up to 3 questions about feel
 
