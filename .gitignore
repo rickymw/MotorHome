@@ -5,7 +5,8 @@
 whisper/
 
 # Claude Code internals
-.claude/
+.claude/*
+!.claude/skills/
 
 # Go build artifacts (executables are intentionally committed as deployment artefacts)
 # Uncomment the lines below if you don't want to commit binaries:
