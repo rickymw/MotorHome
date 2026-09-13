@@ -177,7 +177,18 @@ function renderStatus(data) {
     return;
   }
   clear($("#rig-status"), table([
-    { head: "App", get: (a) => a.name },
+    {
+      // The process name and any error sit under the app name rather than in a
+      // column of their own: a fourth text column pushed the Start/Stop buttons
+      // past the edge of the card, where they hid behind a sideways scroll.
+      head: "App",
+      get: (a) => {
+        const sub = a.error || (a.process !== a.name ? a.process : "");
+        if (!sub) return a.name;
+        return el("span", {}, a.name,
+          el("div", { class: "cell-sub" + (a.error ? " bad" : ""), text: sub }));
+      },
+    },
     {
       head: "State",
       get: (a) => {
@@ -187,7 +198,6 @@ function renderStatus(data) {
       },
     },
     { head: "PID", num: true, get: (a) => a.pid || "—" },
-    { head: "Detail", get: (a) => a.error || a.process },
     {
       head: "",
       get: (a) => {

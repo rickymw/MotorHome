@@ -236,3 +236,5 @@ tbody tr:last-child td { border-bottom: none; }
   color: var(--muted);
 }
 .row-actions { display: inline-flex; gap: 6px; }
+.cell-sub { color: var(--muted); font-family: var(--mono); font-size: 11px; overflow-wrap: anywhere; }
+.cell-sub.bad { color: var(--bad); }
