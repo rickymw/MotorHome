@@ -318,6 +318,181 @@ func TestStopClearsRunningApps(t *testing.T) {
 	}
 }
 
+func findApp(t *testing.T, got controlResponse, name string) launcher.AppResult {
+	t.Helper()
+	for _, a := range got.Apps {
+		if a.Name == name {
+			return a
+		}
+	}
+	t.Fatalf("no row for %q in %+v", name, got.Apps)
+	return launcher.AppResult{}
+}
+
+func TestStartOneAppLeavesTheOthersAlone(t *testing.T) {
+	s, pm, _ := testServer(t, nil)
+
+	got := decode[controlResponse](t, do(t, s, "POST", "/api/start", `{"app":"SimHub"}`))
+
+	if len(pm.spawned) != 1 || pm.spawned[0] != "SimHub" {
+		t.Fatalf("spawned %v, want only SimHub", pm.spawned)
+	}
+	// The response still covers the whole rig, so the table redraws every row.
+	if got.Total != 2 || got.Running != 1 {
+		t.Errorf("running/total = %d/%d, want 1/2", got.Running, got.Total)
+	}
+	if a := findApp(t, got, "SimHub"); a.Outcome != launcher.OutcomeLaunched || a.PID == 0 {
+		t.Errorf("SimHub = %+v, want launched with a pid", a)
+	}
+	if a := findApp(t, got, "iRacing"); a.Outcome != launcher.OutcomeStopped {
+		t.Errorf("iRacing = %+v, want stopped", a)
+	}
+}
+
+// A process spawned a moment ago may not be listed yet. The started row must
+// report Start's own result, not a status re-check that would call it stopped.
+func TestStartOneAppReportsLaunchEvenIfNotYetListed(t *testing.T) {
+	s, pm, _ := testServer(t, nil)
+	lagging := &laggingPM{fakePM: pm}
+	s.deps.NewProcessManager = func() launcher.ProcessManager { return lagging }
+
+	got := decode[controlResponse](t, do(t, s, "POST", "/api/start", `{"app":"SimHub"}`))
+
+	if a := findApp(t, got, "SimHub"); a.Outcome != launcher.OutcomeLaunched {
+		t.Errorf("SimHub = %+v, want launched", a)
+	}
+}
+
+// laggingPM spawns without the process showing up in IsRunning afterwards.
+type laggingPM struct {
+	*fakePM
+}
+
+func (l *laggingPM) Spawn(app config.App) launcher.SpawnResult {
+	res := l.fakePM.Spawn(app)
+	delete(l.fakePM.running, app.Name)
+	return res
+}
+
+func TestStartOneAppSkipsItsDelay(t *testing.T) {
+	s, pm, _ := testServer(t, nil)
+	s.deps.LoadConfig = func() (config.Config, error) {
+		return config.Config{Apps: []config.App{
+			{Name: "iRacing", Path: `C:\ir.exe`, DelayMs: 60000},
+			{Name: "SimHub", Path: `C:\sh.exe`, DelayMs: 60000},
+		}}, nil
+	}
+
+	start := time.Now()
+	do(t, s, "POST", "/api/start", `{"app":"iRacing"}`)
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("single-app start took %v — the sequence delay was applied", elapsed)
+	}
+	if len(pm.spawned) != 1 {
+		t.Errorf("spawned %v, want one app", pm.spawned)
+	}
+}
+
+func TestStopOneAppLeavesTheOthersRunning(t *testing.T) {
+	s, pm, _ := testServer(t, nil)
+	pm.running["iRacingSim64DX11"] = 10
+	pm.running["SimHub"] = 11
+
+	got := decode[controlResponse](t, do(t, s, "POST", "/api/stop", `{"app":"SimHub"}`))
+
+	if len(pm.killed) != 1 || pm.killed[0] != "SimHub" {
+		t.Fatalf("killed %v, want only SimHub", pm.killed)
+	}
+	if a := findApp(t, got, "SimHub"); a.Outcome != launcher.OutcomeStopped {
+		t.Errorf("SimHub = %+v, want stopped", a)
+	}
+	if a := findApp(t, got, "iRacing"); a.Outcome != launcher.OutcomeRunning {
+		t.Errorf("iRacing = %+v, want still running", a)
+	}
+}
+
+func TestStopOneAppCarriesKillFailure(t *testing.T) {
+	s, pm, _ := testServer(t, nil)
+	pm.running["SimHub"] = 11
+	pm.killErr["SimHub"] = errors.New("access denied")
+
+	got := decode[controlResponse](t, do(t, s, "POST", "/api/stop", `{"app":"SimHub"}`))
+
+	if a := findApp(t, got, "SimHub"); a.Outcome != launcher.OutcomeFailed || a.Err != "access denied" {
+		t.Errorf("SimHub = %+v, want failed with the kill error", a)
+	}
+}
+
+func TestControlSingleAppRefusesToGuess(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		body string
+		want int
+	}{
+		{"unknown app", "/api/start", `{"app":"Crew Chief"}`, http.StatusNotFound},
+		{"unknown app on stop", "/api/stop", `{"app":"Crew Chief"}`, http.StatusNotFound},
+		// An empty name must not fall through to "all apps".
+		{"empty name", "/api/stop", `{"app":""}`, http.StatusBadRequest},
+		{"blank name", "/api/start", `{"app":"   "}`, http.StatusBadRequest},
+		{"unknown field", "/api/stop", `{"target":"SimHub"}`, http.StatusBadRequest},
+		{"not json", "/api/start", `SimHub`, http.StatusBadRequest},
+		// Process image names are not accepted as app names.
+		{"process name", "/api/start", `{"app":"iRacingSim64DX11"}`, http.StatusNotFound},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s, pm, _ := testServer(t, nil)
+			pm.running["SimHub"] = 11
+			w := do(t, s, "POST", c.path, c.body)
+			if w.Code != c.want {
+				t.Fatalf("status = %d, want %d: %s", w.Code, c.want, w.Body.String())
+			}
+			if len(pm.spawned) != 0 || len(pm.killed) != 0 {
+				t.Errorf("a refused request still acted: spawned %v, killed %v", pm.spawned, pm.killed)
+			}
+		})
+	}
+}
+
+func TestControlSingleAppRejectsDuplicateNames(t *testing.T) {
+	s, pm, _ := testServer(t, nil)
+	s.deps.LoadConfig = func() (config.Config, error) {
+		return config.Config{Apps: []config.App{
+			{Name: "SimHub", Path: `C:\a.exe`, ProcessName: "SimHubA"},
+			{Name: "SimHub", Path: `C:\b.exe`, ProcessName: "SimHubB"},
+		}}, nil
+	}
+
+	w := do(t, s, "POST", "/api/start", `{"app":"SimHub"}`)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", w.Code, w.Body.String())
+	}
+	if len(pm.spawned) != 0 {
+		t.Errorf("spawned %v on an ambiguous name", pm.spawned)
+	}
+}
+
+// Stopping one entry kills by image name, so another entry sharing that
+// process stops too. The table must show it rather than keep reporting it up.
+func TestStopOneAppShowsSharedProcessStopping(t *testing.T) {
+	s, pm, _ := testServer(t, nil)
+	s.deps.LoadConfig = func() (config.Config, error) {
+		return config.Config{Apps: []config.App{
+			{Name: "SimHub", Path: `C:\a.exe`},
+			{Name: "SimHub dash", Path: `C:\a.exe`, ProcessName: "SimHub"},
+		}}, nil
+	}
+	pm.running["SimHub"] = 11
+
+	got := decode[controlResponse](t, do(t, s, "POST", "/api/stop", `{"app":"SimHub"}`))
+
+	if a := findApp(t, got, "SimHub dash"); a.Outcome != launcher.OutcomeStopped {
+		t.Errorf("SimHub dash = %+v, want stopped alongside SimHub", a)
+	}
+}
+
 func TestControlReportsUnreadableConfig(t *testing.T) {
 	s, _, _ := testServer(t, func(d *Deps) {
 		d.LoadConfig = func() (config.Config, error) { return config.Config{}, errors.New("boom") }

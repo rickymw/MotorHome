@@ -613,6 +613,17 @@ failures in. A kill that returns without error says taskkill was *accepted*, not
 that the process is gone — SimHub restarts itself — so the panel shows the rig's
 actual state rather than the state the stop attempt implied.
 
+The Rig panel can also start or stop **one** app: `/api/start` and `/api/stop`
+take an optional `{"app": "<display name>"}` body (no body = all apps). The
+handler reuses `Start`/`Stop` on a config narrowed to that app rather than adding
+single-app functions to `launcher`. Four decisions, all tested: an empty name is
+a 400 rather than "all" (so a page bug cannot stop the whole rig); an unknown or
+duplicated display name is a 404/409 rather than a guess; a single-app start
+zeroes that app's `delayMs`, since the delay spaces out a sequence and one app
+has none — the one place a caller legitimately skips it; and the response always
+covers every app, because killing by image name also stops other entries sharing
+that `processName`.
+
 ## Adding a new subcommand
 
 1. **Business logic** — add a new package `internal/<name>/` with its own `README.md`

@@ -150,6 +150,26 @@ function selectPanel(name) {
 
 /* ── rig: apps ─────────────────────────────────────────────────────── */
 
+const appIsUp = (a) => ["running", "launched", "already-running"].includes(a.outcome);
+
+/* appAction starts or stops one app. The server answers with every row, not
+ * just this one: stopping an app kills by process image name, so another entry
+ * sharing that process goes down with it, and the table should show that. */
+async function appAction(btn, action, name) {
+  await withBusy(btn, async () => {
+    try {
+      const data = await api(`/api/${action}`, { method: "POST", body: JSON.stringify({ app: name }) });
+      renderStatus(data);
+      const row = data.apps.find((a) => a.name === name);
+      if (!row) return;
+      if (row.outcome === "failed") toast(`${name}: ${row.error || "failed"}`, "error");
+      else if (action === "start") toast(`${name} ${row.outcome === "already-running" ? "was already running" : "started"}.`, "ok");
+      else if (appIsUp(row)) toast(`${name} is still running.`, "error");
+      else toast(`${name} stopped.`, "ok");
+    } catch (e) { toast(e.message, "error"); }
+  });
+}
+
 function renderStatus(data) {
   $("#rig-summary").textContent = `${data.running}/${data.total} running`;
   if (!data.apps.length) {
@@ -162,12 +182,23 @@ function renderStatus(data) {
       head: "State",
       get: (a) => {
         if (a.outcome === "failed") return el("span", { class: "pill err", text: "ERROR" });
-        const up = ["running", "launched", "already-running"].includes(a.outcome);
+        const up = appIsUp(a);
         return el("span", { class: "pill " + (up ? "on" : "off"), text: up ? "RUNNING" : "STOPPED" });
       },
     },
     { head: "PID", num: true, get: (a) => a.pid || "—" },
     { head: "Detail", get: (a) => a.error || a.process },
+    {
+      head: "",
+      get: (a) => {
+        // A failed row could be a failed start or a failed stop, and the
+        // outcome does not say which, so offer both rather than guess.
+        const start = el("button", { class: "btn small", onclick: (ev) => appAction(ev.target, "start", a.name) }, "Start");
+        const stop = el("button", { class: "btn small danger", onclick: (ev) => appAction(ev.target, "stop", a.name) }, "Stop");
+        if (a.outcome === "failed") return el("span", { class: "row-actions" }, start, stop);
+        return appIsUp(a) ? stop : start;
+      },
+    },
   ], data.apps));
 }
 

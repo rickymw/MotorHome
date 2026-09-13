@@ -21,7 +21,7 @@ is how this rig is often used.
 |---|---|
 | `gui.go` | `Deps`, `Server`, routing, the loopback guard |
 | `api.go` | JSON response helpers; the one `{"error": …}` shape |
-| `control.go` | `/api/status`, `/api/start`, `/api/stop` |
+| `control.go` | `/api/status`, `/api/start`, `/api/stop` — all apps, or one named in the body |
 | `settings.go` | `/api/config` GET and PUT |
 | `sessions.go` | `/api/sessions` listing, `/api/analyze` proxy |
 | `pbview.go` | `/api/pb` list and detail |
@@ -87,6 +87,33 @@ re-exec itself under UAC and read the elevated child's output back, so the
 browser path and the Stream Deck path elevate the same way and there is only one
 place where that has to be right. Enumeration stays in-process; it needs no
 rights.
+
+## Starting and stopping one app
+
+`POST /api/start` and `POST /api/stop` take an optional body, `{"app": "SimHub"}`.
+With no body they act on every app, which is what **Start all** / **Stop all**
+send; with one they act on that app alone, which is what each row's own button
+sends. Either way the response covers every app, so the table redraws from one
+answer.
+
+- **The name is the display name**, matched exactly — the name shown in the
+  table, not the process image name.
+- **An empty name is a 400, not "all apps".** `app` is a pointer so the handler
+  can tell a missing field from a blank one; reading a page bug's empty string as
+  "everything" would stop the whole rig when one app was meant.
+- **It refuses to guess.** An unknown name is a 404. Two config entries with the
+  same display name — which `Validate` allows — is a 409 naming the fix, rather
+  than acting on whichever comes first.
+- **A single-app start skips that app's `delayMs`.** The delay spaces out a
+  sequence (an app launched before the one that attaches to it); one app has no
+  sequence, and honouring it would just hold the request open after the launch.
+  Start-all keeps every delay.
+- **The started row reports `Start`'s own result**, laid over a fresh status pass
+  for the others. A process spawned a moment ago may not be in `tasklist` yet and
+  would otherwise read as stopped.
+- **A single-app stop still re-checks every app.** Kill works by image name, so
+  stopping one entry also stops any other entry sharing its `processName`; the
+  re-check makes the table show that instead of hiding it.
 
 ## Serialised work
 

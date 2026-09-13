@@ -235,3 +235,4 @@ tbody tr:last-child td { border-bottom: none; }
   letter-spacing: 0.08em;
   color: var(--muted);
 }
+.row-actions { display: inline-flex; gap: 6px; }

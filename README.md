@@ -642,7 +642,7 @@ Five panels:
 
 | Panel | What it does |
 |---|---|
-| **Rig** | Start/stop/status of the configured apps, USB device toggles and a scanner for adding new ones, camera restart |
+| **Rig** | Start/stop/status of the configured apps, all at once or one at a time, USB device toggles and a scanner for adding new ones, camera restart |
 | **Live** | Position, lap timing and deltas, fuel with a running per-lap burn estimate, and track conditions, streamed at 2–30 Hz. Each value is labelled with the iRacing variable it came from |
 | **Sessions** | Pick an `.ibt` and render the full analysis — laps, sectors, phases, vs-PB deltas, exit impact, tyres, consistency, fuel, voice notes |
 | **Personal bests** | Browse `pb.json`; open an entry for its setup, phase data and stored brake points |
