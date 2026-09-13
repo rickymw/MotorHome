@@ -28,7 +28,7 @@ is how this rig is often used.
 | `devices.go` | `/api/usb` list, set and scan; `/api/camera` |
 | `shaker.go` | `/api/shaker` status, run and stop |
 | `live.go` | `/api/live` snapshot, `/api/live/stream` SSE |
-| `static/` | `index.html`, `app.js`, `style.css`, embedded via `go:embed` |
+| `static/` | `index.html`, `app.js`, `style.css`, `logo.svg`, embedded via `go:embed` |
 
 ## Dependency injection, and why
 
@@ -208,30 +208,37 @@ paths are free text from iRacing and from the user's own files; building through
 
 ## The mark
 
-`static/logo.svg` (topbar) and `static/favicon.svg` (tab icon): a slick tyre
-under a chevron roofline — a shift light at a glance and a motor *home* on the
-second look. Two elements, two colours, drawn on a 64-unit grid, so it survives
-down to a 16px favicon.
+`static/logo.svg` is both the topbar mark and the tab icon: an F1 tyre under a
+chevron roofline — a shift light at a glance and a motor *home* on the second
+look. Drawn on a 64-unit grid so it survives down to a 16px favicon.
 
-They are **two files rather than one referenced twice**, which is the only
-non-obvious part. The app chrome is dark by deliberate choice (see the note at
-the top of `style.css`), so the topbar mark can hard-code a light tyre. A
-browser tab strip is not the app and follows the OS, so `favicon.svg` carries a
-`prefers-color-scheme` block and swaps the tyre to dark on a light strip. A
-single file cannot do both: the media-query version renders a dark tyre on the
-dark topbar whenever the OS is in light mode, which is invisible. The accent
-roof is the same `#4fa3ff` in both because it reads on either ground.
+The tyre is mid-grey rubber (`#676d78`) with a broken red stripe (`#e8352e`,
+the soft compound). Three decisions behind that:
 
-Note also that the roof and the tyre are drawn with a deliberate gap between
-them, sized so it stays open at 16px rather than closing into a single blob.
-Adjusting either the roof's `stroke-width` or the circle's radius eats into that
-gap from both sides — the clear space is what is left after both strokes, not
-the distance between the two paths' centrelines.
+- **Not white, and not true black.** White read as an "O" rather than a tyre;
+  near-black rubber vanished into the `#1c1f25` panel and left only the red
+  ring. The grey has to be light enough to separate from the panel without
+  drifting to silver (`#7a808b` already looks metallic).
+- **The stripe is broken, not a full ring.** A full concentric stripe inside the
+  tyre band reads as an archery target. Two arcs with diagonal gaps read as
+  sidewall lettering.
+- **One file, not two.** An earlier version shipped a light-tyre `logo.svg` for
+  the dark topbar plus a `favicon.svg` with a `prefers-color-scheme` block,
+  because a white tyre disappears on a light tab strip. Mid-grey rubber and a
+  red stripe hold on light and dark grounds alike, so that split no longer
+  earns its keep — keep it that way if the colours change, or the second file
+  comes back.
 
-`TestBrandingAssets` asserts both files are served as `image/svg+xml` and that
-`index.html` still references the names they are served under, because a rename
-degrades silently: the page renders perfectly, just with no mark and no tab
-icon.
+The roof and the tyre have a measured **clear gap of about 4.5 units**, sized so
+it stays open at 16px. That gap is what is left after *both* strokes — the
+roof's half stroke-width and the tyre's outer edge — not the distance between
+the centrelines, so enlarging the tyre or thickening the roof closes it from
+both sides. The tyre's outer edge also sits within a fraction of a unit of the
+bottom of the viewBox; a larger radius clips.
+
+`TestBrandingAssets` asserts the file is served as `image/svg+xml` and that
+`index.html` still references it for both the icon and the topbar, because a
+rename degrades silently: the page renders perfectly, just with no mark.
 
 ## Testing
 

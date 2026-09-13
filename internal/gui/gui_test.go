@@ -1177,7 +1177,7 @@ func TestLiveStreamRejectsBadHz(t *testing.T) {
 // a silent failure at build time rather than a compile error.
 func TestStaticAssetsAreEmbedded(t *testing.T) {
 	s, _, _ := testServer(t, nil)
-	for _, path := range []string{"/", "/app.js", "/style.css", "/logo.svg", "/favicon.svg"} {
+	for _, path := range []string{"/", "/app.js", "/style.css", "/logo.svg"} {
 		w := do(t, s, "GET", path, "")
 		if w.Code != http.StatusOK {
 			t.Errorf("GET %s = %d, want 200", path, w.Code)
@@ -1191,12 +1191,12 @@ func TestStaticAssetsAreEmbedded(t *testing.T) {
 
 // The mark is served as a file rather than inlined, so a rename breaks the
 // topbar and the tab icon silently — the page still renders, just without
-// them. Assert both that the files are SVG and that index.html still points
-// at the names they are actually served under.
+// them. Assert that the file is SVG and that index.html still points at it
+// under the name it is actually served as, for both uses.
 func TestBrandingAssets(t *testing.T) {
 	s, _, _ := testServer(t, nil)
 
-	for _, path := range []string{"/logo.svg", "/favicon.svg"} {
+	for _, path := range []string{"/logo.svg"} {
 		w := do(t, s, "GET", path, "")
 		if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "image/svg+xml") {
 			t.Errorf("GET %s Content-Type = %q, want image/svg+xml", path, ct)
@@ -1207,7 +1207,7 @@ func TestBrandingAssets(t *testing.T) {
 	}
 
 	index := do(t, s, "GET", "/", "").Body.String()
-	for _, ref := range []string{`href="/favicon.svg"`, `src="/logo.svg"`} {
+	for _, ref := range []string{`rel="icon" href="/logo.svg"`, `src="/logo.svg"`} {
 		if !strings.Contains(index, ref) {
 			t.Errorf("index.html does not reference %s", ref)
 		}

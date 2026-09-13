@@ -512,12 +512,13 @@ is enforced in the handler (`guiMaxLevel`), not just in the page's menu: a
 browser control is easier to hit by accident than a typed command, and the
 request body is the only thing between a stray click and full-scale output.
 
-**The mark ships as two SVGs, not one.** `static/logo.svg` (topbar) hard-codes a
-light tyre because the app chrome is deliberately dark-only; `static/favicon.svg`
-carries a `prefers-color-scheme` block because a tab strip follows the OS. One
-shared file would render a dark tyre on the dark topbar whenever the OS is light.
-No Go change was needed for either — `//go:embed static` and the `FileServer` at
-`GET /` pick up anything dropped in that directory.
+**The mark is one SVG** (`static/logo.svg`), used for both the topbar and the
+tab icon: an F1 tyre in mid-grey rubber with a broken red soft-compound stripe,
+under the accent roofline. It was briefly two files — a light tyre for the dark
+topbar plus a `prefers-color-scheme` favicon — but grey rubber holds on light and
+dark tab strips alike, so the split was dropped. No Go change was needed —
+`//go:embed static` and the `FileServer` at `GET /` pick up anything in that
+directory.
 
 **A browser, not a window.** Every Go GUI toolkit brings a dependency tree this
 repo does not have — fyne pulls cgo and OpenGL, walk pulls `golang.org/x/sys` —
