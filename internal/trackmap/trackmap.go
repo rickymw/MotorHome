@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/rickymw/MotorHome/internal/textenc"
 )
 
 // SegmentKind classifies a track segment.
@@ -215,6 +217,31 @@ func Load(path string) (TrackMapFile, error) {
 		}
 	}
 	return tmf, nil
+}
+
+// AdoptLegacyName moves an entry stored under the pre-decoding form of track
+// (see textenc.LegacyJSONName) to track itself, and reports whether it did.
+//
+// Before session YAML was decoded from Windows-1252, a name like
+// "Baden-Württemberg" was saved as "Baden-W�rttemberg" and never found
+// again. The mangled key cannot be decoded back — U+FFFD has lost the byte —
+// so the migration has to start from the correct name. An entry already under
+// track wins: it was written after the fix and is the newer of the two.
+func (tmf TrackMapFile) AdoptLegacyName(track string) bool {
+	legacy := textenc.LegacyJSONName(track)
+	if legacy == track {
+		return false
+	}
+	old, ok := tmf[legacy]
+	if !ok {
+		return false
+	}
+	delete(tmf, legacy)
+	if _, exists := tmf[track]; exists {
+		return true
+	}
+	tmf[track] = old
+	return true
 }
 
 // Save writes tmf to path as indented JSON.

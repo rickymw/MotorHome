@@ -922,3 +922,30 @@ func TestSample_Float64s(t *testing.T) {
 		}
 	}
 }
+
+// iRacing writes the session YAML in Windows-1252. SessionInfo must hand back
+// UTF-8, or a track name with an umlaut becomes a JSON key that never matches.
+func TestOpen_SessionInfoDecodedFromWindows1252(t *testing.T) {
+	path := buildTestFile(t)
+	raw := "TrackDisplayName: Baden-W\xfcrttemberg\n"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	si := make([]byte, tfSessionInfoLen)
+	copy(si, raw)
+	copy(data[tfSessionInfoOffset:], si)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer f.Close()
+
+	if got, want := f.SessionInfo(), "TrackDisplayName: Baden-Württemberg\n"; got != want {
+		t.Errorf("SessionInfo = %q, want %q", got, want)
+	}
+}

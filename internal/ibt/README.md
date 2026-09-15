@@ -21,6 +21,8 @@ Offset H.VarBuf[0].BufOffset → data rows (H.BufLen bytes each, H.SessionRecord
 
 Sanity bounds are enforced at parse time (max 10 MB session YAML, max 4096 variables, each variable's byte range must fit within the row width) to guard against corrupt files.
 
+The session YAML is **decoded from Windows-1252 to UTF-8** at open time (`textenc.Decode`), so `SessionInfo()` never returns invalid UTF-8. iRacing writes it in Windows-1252; a raw `0xFC` in "Baden-Württemberg" otherwise became a different string after a JSON round trip, and every stored lookup keyed on the track name missed. See [internal/textenc](../textenc/README.md).
+
 ## Architecture
 
 | Symbol | Description |

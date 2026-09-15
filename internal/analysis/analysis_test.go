@@ -1357,3 +1357,20 @@ func TestZoneStats_WheelspinDetection(t *testing.T) {
 		t.Errorf("zone 1: WheelspinSamples = %d, want 0", zones[1].WheelspinSamples)
 	}
 }
+
+// Names from a raw Windows-1252 YAML must come back as UTF-8 — they are used as
+// trackmap.json and pb.json keys, and encoding/json mangles invalid bytes.
+func TestParseSessionMeta_DecodesWindows1252(t *testing.T) {
+	yaml := "WeekendInfo:\n TrackDisplayName: Hockenheimring Baden-W\xfcrttemberg\n" +
+		"DriverInfo:\n DriverCarIdx: 0\n Drivers:\n - CarIdx: 0\n   UserName: J\xfcrgen M\xfcller\n   CarScreenName: Global Mazda MX-5 Cup\n"
+	m := ParseSessionMeta(yaml, "Jürgen Müller")
+	if m.TrackDisplayName != "Hockenheimring Baden-Württemberg" {
+		t.Errorf("TrackDisplayName = %q", m.TrackDisplayName)
+	}
+	if m.DriverName != "Jürgen Müller" {
+		t.Errorf("DriverName = %q (config name must match the decoded YAML)", m.DriverName)
+	}
+	if m.CarScreenName != "Global Mazda MX-5 Cup" {
+		t.Errorf("CarScreenName = %q", m.CarScreenName)
+	}
+}

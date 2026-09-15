@@ -394,3 +394,44 @@ func TestUpdate_IndependentCarTrackCombos(t *testing.T) {
 		t.Errorf("Car B / Track X laptime wrong")
 	}
 }
+
+// ---- AdoptLegacyKey ----
+
+func TestAdoptLegacyKey_MovesEntryAndFixesFields(t *testing.T) {
+	const car, track = "Global Mazda MX-5 Cup", "Hockenheimring Baden-Württemberg"
+	legacyTrack := "Hockenheimring Baden-W\uFFFDrttemberg"
+	pbf := File{Key(car, legacyTrack): {LapTime: 110, Car: car, Track: legacyTrack, Phases: []PBPhase{{}}}}
+
+	if !AdoptLegacyKey(pbf, car, track) {
+		t.Fatal("expected the legacy entry to be adopted")
+	}
+	got := pbf[Key(car, track)]
+	if got == nil || got.LapTime != 110 || len(got.Phases) != 1 {
+		t.Fatalf("entry not moved intact: %+v", got)
+	}
+	if got.Track != track {
+		t.Errorf("Track = %q, want the decoded name", got.Track)
+	}
+	if len(pbf) != 1 {
+		t.Errorf("legacy key left behind: %v", pbf)
+	}
+}
+
+func TestAdoptLegacyKey_ExistingEntryWins(t *testing.T) {
+	const car, track = "MX-5", "Württemberg"
+	legacy := Key(car, "W\uFFFDrttemberg")
+	pbf := File{Key(car, track): {LapTime: 100}, legacy: {LapTime: 90}}
+	if !AdoptLegacyKey(pbf, car, track) {
+		t.Fatal("dropping the stale legacy entry is a change")
+	}
+	if len(pbf) != 1 || pbf[Key(car, track)].LapTime != 100 {
+		t.Errorf("want only the current entry, got %v", pbf)
+	}
+}
+
+func TestAdoptLegacyKey_NoOp(t *testing.T) {
+	pbf := File{Key("MX-5", "Watkins Glen"): {LapTime: 100}}
+	if AdoptLegacyKey(pbf, "MX-5", "Watkins Glen") || AdoptLegacyKey(pbf, "MX-5", "Württemberg") {
+		t.Error("nothing to adopt, want false")
+	}
+}

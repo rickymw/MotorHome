@@ -96,7 +96,7 @@ Two mechanisms make that possible:
 1. Resolve `.ibt` path (explicit, numeric index, or most-recent from `ibtDir`)
 2. Open file, extract laps and session metadata
 3. Find best flying lap; filter flying laps to within 1.5s of best time (drops slow early-practice laps)
-4. Load trackmap; detect from filtered laps if no entry exists (latlon, fallback to lataccel)
+4. Load trackmap and pb.json; `adoptLegacyNames` moves this session's entries off U+FFFD-mangled keys written before session YAML was decoded from Windows-1252, and saves if it did (before the stored-map lookup, or a migrated map would still be re-detected once). Detect from filtered laps if no entry exists (latlon, fallback to lataccel)
 5. Compute match score; compute/blend brake entries on new sessions
 6. Update geometry counters; save trackmap
 7. Load pb.json; update PB if new; save

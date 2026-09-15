@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rickymw/MotorHome/internal/analysis"
+	"github.com/rickymw/MotorHome/internal/pb"
 	"github.com/rickymw/MotorHome/internal/trackmap"
 )
 
@@ -401,5 +402,32 @@ func warnRejectedLapTimes(laps []analysis.Lap) {
 			lap.Number,
 			analysis.FormatLapTime(lap.RejectedOfficialTime),
 			analysis.FormatLapTime(lap.LapTime))
+	}
+}
+
+// adoptLegacyNames moves this session's trackmap.json and pb.json entries off
+// the U+FFFD-mangled keys written before session YAML was decoded from
+// Windows-1252, and saves whichever file changed. It runs before anything reads
+// either store, so the rest of the pipeline only ever sees the correct name.
+//
+// Saving here rather than waiting for the pipeline's own saves matters for
+// pb.json: it is only written on a new PB or a new session, and a migration
+// that stayed in memory would be redone — and reported — on every run.
+func adoptLegacyNames(tmf trackmap.TrackMapFile, trackmapPath string, pbf pb.File, pbPath string, meta analysis.SessionMeta) {
+	if meta.TrackDisplayName != "" && tmf.AdoptLegacyName(meta.TrackDisplayName) {
+		fmt.Fprintf(os.Stderr, "Note: migrated trackmap.json entry for %s from its mis-encoded key\n", meta.TrackDisplayName)
+		if trackmapPath != "" {
+			if err := trackmap.Save(trackmapPath, tmf); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not save track map: %v\n", err)
+			}
+		}
+	}
+	if meta.CarScreenName != "" && meta.TrackDisplayName != "" && pb.AdoptLegacyKey(pbf, meta.CarScreenName, meta.TrackDisplayName) {
+		fmt.Fprintf(os.Stderr, "Note: migrated pb.json entry for %s on %s from its mis-encoded key\n", meta.CarScreenName, meta.TrackDisplayName)
+		if pbPath != "" {
+			if err := pb.Save(pbPath, pbf); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not save pb.json: %v\n", err)
+			}
+		}
 	}
 }

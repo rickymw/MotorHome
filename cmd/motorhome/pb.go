@@ -245,6 +245,7 @@ func runPBDiff(args []string, cfg config.Config, pbPath string) {
 
 	meta := analysis.ParseSessionMeta(f.SessionInfo(), cfg.Driver)
 	pbf := loadPBFile(pbPath)
+	pb.AdoptLegacyKey(pbf, meta.CarScreenName, meta.TrackDisplayName) // in memory only
 	entry := pbf[pb.Key(meta.CarScreenName, meta.TrackDisplayName)]
 	if entry == nil {
 		pbDie("no stored PB for %q on %q", meta.CarScreenName, meta.TrackDisplayName)

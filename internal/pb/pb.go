@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/rickymw/MotorHome/internal/textenc"
 )
 
 // PersonalBest holds the fastest recorded lap for a single car/track combo,
@@ -84,6 +86,36 @@ func writeFileAtomic(path string, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+// AdoptLegacyKey moves an entry stored under the pre-decoding form of car and
+// track (see textenc.LegacyJSONName) to Key(car, track), rewriting its Car and
+// Track fields to match, and reports whether it changed pbf.
+//
+// Before session YAML was decoded from Windows-1252, "Baden-Württemberg" was
+// saved as "Baden-W�rttemberg": the lookup missed on every run, so every
+// run set a "new PB" under the mangled key and there was never a vs-PB table.
+// An entry already under the correct key wins, and the legacy one is dropped.
+func AdoptLegacyKey(pbf File, car, track string) bool {
+	legacyCar, legacyTrack := textenc.LegacyJSONName(car), textenc.LegacyJSONName(track)
+	if legacyCar == car && legacyTrack == track {
+		return false
+	}
+	legacy := Key(legacyCar, legacyTrack)
+	old, ok := pbf[legacy]
+	if !ok {
+		return false
+	}
+	delete(pbf, legacy)
+	key := Key(car, track)
+	if _, exists := pbf[key]; exists {
+		return true
+	}
+	if old != nil {
+		old.Car, old.Track = car, track
+	}
+	pbf[key] = old
+	return true
 }
 
 // Update checks whether lapTime beats the stored PB for the given car/track.

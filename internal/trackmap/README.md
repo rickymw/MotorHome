@@ -83,6 +83,8 @@ Names are applied in memory on each run and are deliberately *not* written to `t
 
 Each `Segment` stores geometric boundaries (`entryPct`/`exitPct`) and an optional `brakeEntryPct` — the average distance where drivers begin braking, blended with weighted averaging across sessions.
 
+**Mis-encoded keys.** Before session YAML was decoded from Windows-1252, a non-ASCII track name was stored with U+FFFD in place of each accented byte (`Baden-W�rttemberg`) and never found again. `TrackMapFile.AdoptLegacyName(track)` moves such an entry to the correct name (an entry already under the correct name wins and the legacy one is dropped); `analyze` calls it before reading the store and saves when it changed anything. `trackref.json` is hand-edited and never written, so `Corners`/`CornerNames` instead fall back to the legacy key on a miss. See [internal/textenc](../textenc/README.md).
+
 ## Architecture
 
 | Symbol | Description |

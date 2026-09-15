@@ -149,7 +149,7 @@ Notes falling outside the recording come back with `Located == false` and keep t
 | `NoteInput` / `LocatedNote` | A voice note awaiting placement, and the same note resolved to a lap, lap distance and segment (`Located` false when it falls outside the recording). |
 | `SetupValue` / `SetupDiffEntry` | A flattened `CarSetup` leaf (`Path`, `Value`), and one difference between two setups (`Path`, `Old`, `New`). |
 | `Zone` | Per-zone stats for the legacy 20-zone split. |
-| `SessionMeta` | Car, track, and driver name parsed from session YAML. |
+| `SessionMeta` | Car, track, and driver name parsed from session YAML. `ParseSessionMeta` decodes the YAML from Windows-1252 first (a no-op on the already-decoded `ibt.File.SessionInfo()`), because these names become JSON map keys and invalid UTF-8 does not survive the round trip. |
 | `TyreSummary` / `CornerTyres` | Per-corner avg surface (tread) temps (inner/outer mapped from iRacing tempL/tempR accounting for left- vs right-side), end-of-lap wear, avg hot pressure, and brake bias for one lap. Uses surface temp rather than iRacing's carcass-temp channels, which freeze at a stale value for entire sessions on some cars. |
 
 ### Key functions

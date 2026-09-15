@@ -846,3 +846,68 @@ func TestTrackRefFile_CornerNames(t *testing.T) {
 		t.Errorf("CornerNames for unknown track = %v, want nil", got)
 	}
 }
+
+// ---- legacy (pre-decoding) keys ----
+
+const (
+	hockUTF8   = "Hockenheimring Baden-Württemberg"
+	hockLegacy = "Hockenheimring Baden-W\uFFFDrttemberg"
+)
+
+func TestAdoptLegacyName_MovesEntry(t *testing.T) {
+	tm := &TrackMap{SessionsUsed: 1}
+	tmf := TrackMapFile{hockLegacy: tm}
+	if !tmf.AdoptLegacyName(hockUTF8) {
+		t.Fatal("expected the legacy entry to be adopted")
+	}
+	if tmf[hockUTF8] != tm {
+		t.Error("entry not moved to the decoded name")
+	}
+	if _, ok := tmf[hockLegacy]; ok {
+		t.Error("legacy key left behind")
+	}
+}
+
+func TestAdoptLegacyName_ExistingEntryWins(t *testing.T) {
+	current, stale := &TrackMap{SessionsUsed: 3}, &TrackMap{SessionsUsed: 1}
+	tmf := TrackMapFile{hockUTF8: current, hockLegacy: stale}
+	if !tmf.AdoptLegacyName(hockUTF8) {
+		t.Fatal("dropping the stale legacy entry is a change")
+	}
+	if tmf[hockUTF8] != current || len(tmf) != 1 {
+		t.Errorf("want only the current entry, got %v", tmf)
+	}
+}
+
+func TestAdoptLegacyName_NoOp(t *testing.T) {
+	tmf := TrackMapFile{"Watkins Glen": &TrackMap{}}
+	if tmf.AdoptLegacyName("Watkins Glen") || tmf.AdoptLegacyName(hockUTF8) {
+		t.Error("nothing to adopt, want false")
+	}
+}
+
+// The failure this guards against: a decoded name saved and loaded back must be
+// the same key. Before decoding, the raw 0xFC byte did not survive the trip.
+func TestSaveLoad_NonASCIITrackNameRoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "trackmap.json")
+	if err := Save(path, TrackMapFile{hockUTF8: &TrackMap{SessionsUsed: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got[hockUTF8]; !ok {
+		t.Errorf("decoded name did not round-trip; keys: %v", got)
+	}
+}
+
+func TestTrackRefFile_LegacyKeyFallback(t *testing.T) {
+	trf := TrackRefFile{hockLegacy: {Corners: 12, CornerNames: []string{"T1"}}}
+	if n, ok := trf.Corners(hockUTF8); !ok || n != 12 {
+		t.Errorf("Corners = %d, %v; want 12, true", n, ok)
+	}
+	if names := trf.CornerNames(hockUTF8); len(names) != 1 {
+		t.Errorf("CornerNames = %v", names)
+	}
+}

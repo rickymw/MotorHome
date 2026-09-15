@@ -157,7 +157,8 @@ Each package has its own README with full detail. Below is a terse summary with 
 | `cmd/motorhome` | Entry point, flag parsing, subcommand dispatch (`analyze.go`, `coach.go`, `pb.go`, `notes.go`) | [README](cmd/motorhome/README.md) |
 | `internal/config` | `Config`/`App` structs, JSON load, `Validate()` | [README](internal/config/README.md) |
 | `internal/launcher` | `ProcessManager` interface; `RunStart`/`RunStop`/`RunStatus`; `tasklist`/`taskkill`; `SeDebugPrivilege` fallback | [README](internal/launcher/README.md) |
-| `internal/ibt` | Low-level `.ibt` binary parser; `File.Sample(i)` typed accessor | [README](internal/ibt/README.md) |
+| `internal/ibt` | Low-level `.ibt` binary parser; `File.Sample(i)` typed accessor; session YAML decoded to UTF-8 at open | [README](internal/ibt/README.md) |
+| `internal/textenc` | `Decode` (Windows-1252 → UTF-8, valid UTF-8 untouched); `LegacyJSONName` for finding keys stored before decoding | [README](internal/textenc/README.md) |
 | `internal/analysis` | `ExtractLaps`, `ComputePhases`, `ComputeBrakeEntries`, `ComputeTyreSummary`, `ComputeConsistency`, `ComputeFuel`, `LocateNotes`, `DumpSegmentCSV`/`DumpSegmentAllLapsCSV`, `FlattenSetup`/`DiffSetups`, `ParseSessionMeta`, `ParseSectors`/`ComputeSectorTimes` | [README](internal/analysis/README.md) |
 | `internal/trackmap` | GPS curvature corner detection (`latlon`) with steering/speed/lat-G validation; fallback `lataccel`; `trackmap.json` load/save | [README](internal/trackmap/README.md) |
 | `internal/pb` | Personal best store; `pb.Update` returns true on new PB; `PBPhase` stores per-segment data for delta comparison | [README](internal/pb/README.md) |
@@ -492,6 +493,13 @@ Why this matters: iRacing's track-limits enforcement is lenient — a driver who
 ### Driver/car resolution
 `ParseSessionMeta(yaml, driverName)`: match `UserName` case-insensitively → fallback `DriverCarIdx` → first `CarScreenName`.
 
+### Session YAML encoding
+**iRacing writes the session YAML in Windows-1252, not UTF-8** — in `.ibt` files and in shared memory. "Hockenheimring Baden-Württemberg" arrives with a raw `0xFC`. Go carries the byte fine, but `encoding/json` replaces invalid bytes with U+FFFD on write, so the name saved as a `trackmap.json`/`pb.json` key was not the name looked up next run: every Hockenheim run printed "Track map created … (first detection)" and "[NEW PB!]", the map never passed 1 session, and there was never a vs-PB table.
+
+The YAML is decoded once at the source — `ibt.parse` and `iracing.ReadLiveData` call `textenc.Decode` — so everything downstream (names, setup blocks, driver lists, the GUI) sees UTF-8. `ParseSessionMeta` decodes again defensively; `Decode` leaves valid UTF-8 untouched, so that is a no-op on decoded input and a future UTF-8 iRacing build is not double-encoded. The validity check is over the whole document rather than per byte run, since Windows-1252 text can contain pairs that happen to be valid UTF-8.
+
+Stores written before the fix hold the mangled key, which cannot be decoded (U+FFFD has lost the byte), so migration starts from the correct name: `textenc.LegacyJSONName` computes the old key exactly as `encoding/json` produced it. `analyze` calls `adoptLegacyNames` right after loading both stores and **before** the stored-map lookup (otherwise the first run after the fix still re-detects), moving the session's entries to the correct key and saving. An entry already under the correct key wins. `pb diff` and `analyze -lap pb` adopt in memory only; `trackref.json`, never written by the tool, falls back to the legacy key on lookup.
+
 ### gui subcommand flow (`cmd/motorhome/gui.go`)
 
 Serves the web interface on `127.0.0.1` and opens a browser. Five panels: rig
@@ -674,6 +682,7 @@ All live next to the binary in `G:\RACING\SimAppLauncher\`:
 - S/F line wraparound: tiny corners (< 50 m) at the S/F line are auto-removed, but if the first and last segments are both straights they are not merged into one
 - GPS quantisation in iRacing is systematic (same rounding each lap) so averaging more laps does not reduce noise in the `latlon` method — mitigated by bin-averaging, wide triplet spacing, and post-detection validation (steering/speed confirmation)
 - Dynamic weather sessions do not populate `AirTemp` in the session YAML; PB weather shows track temp only in that case
+- Mis-encoded (U+FFFD) `trackmap.json`/`pb.json` keys from before the Windows-1252 fix are migrated only when `analyze` next runs on a session at that track. Until then `pb list` and the GUI's PB panel show the name with `�`, and `pb show`/`pb prune` filters must match that form
 - `analyze` never prunes `pb.json` — old car/track combos accumulate indefinitely until removed with `motorhome pb prune`
 - Voice notes are placed by wall clock, so their accuracy is bounded by `-note-lag` being an estimate; a note about a corner can land in the adjacent segment
 - `coach -segment` and `analyze -trace` need a track map to name corners against, so neither works on the first session at a new track (nothing to resolve `T3` to yet)

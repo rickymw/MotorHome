@@ -196,9 +196,6 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath, notesDir
 	var geomConf trackmap.GeometryConfidence
 	var matchScore float32 = -1 // -1 means "not computed" (no stored map yet)
 
-	existingTM, hasExisting := tmf[meta.TrackDisplayName]
-	useExisting := hasExisting && len(existingTM.Segments) > 0 && !*updateMap
-
 	// Load pb.json early — used for both brake entries and PB tracking.
 	var pbf pb.File
 	if pbPath != "" {
@@ -211,6 +208,10 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath, notesDir
 	} else {
 		pbf = pb.File{}
 	}
+	adoptLegacyNames(tmf, trackmapPath, pbf, pbPath, meta)
+
+	existingTM, hasExisting := tmf[meta.TrackDisplayName]
+	useExisting := hasExisting && len(existingTM.Segments) > 0 && !*updateMap
 
 	if useExisting {
 		segs = existingTM.Segments

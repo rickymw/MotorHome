@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/rickymw/MotorHome/internal/ibt"
+	"github.com/rickymw/MotorHome/internal/textenc"
 )
 
 // SessionMeta holds car, track, and driver info extracted from the iRacing session YAML.
@@ -22,7 +23,13 @@ type SessionMeta struct {
 // When non-empty it is matched case-insensitively against UserName entries in the
 // Drivers list so that multi-class sessions return the correct car.
 // Falls back to DriverCarIdx, then to the first CarScreenName in the file.
+//
+// The YAML is decoded from Windows-1252 first. ibt.File.SessionInfo already
+// does that and decoding valid UTF-8 is a no-op, so this only matters for a
+// caller holding undecoded text — but these names become JSON map keys, and a
+// raw 0xFC in one made every Hockenheim run a "first detection".
 func ParseSessionMeta(yaml, driverName string) SessionMeta {
+	yaml = textenc.Decode(yaml)
 	var carName, resolvedDriver string
 
 	// Primary: match by UserName from config.

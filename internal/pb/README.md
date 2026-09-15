@@ -42,4 +42,6 @@ if isNew {
 err = pb.Save("pb.json", pbf)
 ```
 
+`AdoptLegacyKey(pbf, car, track)` moves an entry stored under the U+FFFD-mangled key written before session YAML was decoded from Windows-1252 (see [internal/textenc](../textenc/README.md)) to `Key(car, track)`, fixing its `Car`/`Track` fields; an entry already under the correct key wins. `analyze` calls it and saves; `pb diff` and `analyze -lap pb` call it in memory only, since a read should not rewrite the store.
+
 `Key(car, track)` returns the map key; `Load` returns an empty `File` (not an error) when the file does not yet exist. `SetPhases` and `SetSetup` are no-ops if no entry exists; both fields are cleared when a new PB replaces an old one (the caller must repopulate them after `Update`).

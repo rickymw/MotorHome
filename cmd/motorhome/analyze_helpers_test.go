@@ -1,9 +1,13 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/rickymw/MotorHome/internal/analysis"
+	"github.com/rickymw/MotorHome/internal/pb"
 	"github.com/rickymw/MotorHome/internal/trackmap"
 )
 
@@ -131,6 +135,51 @@ func TestParseLapArg(t *testing.T) {
 		}
 		if mode != c.wantMode || num != c.wantNum {
 			t.Errorf("parseLapArg(%q) = (%v, %d), want (%v, %d)", c.in, mode, num, c.wantMode, c.wantNum)
+		}
+	}
+}
+
+// Stores written before session YAML was decoded hold U+FFFD keys. The
+// migration must persist, or pb.json — only saved on a new PB or session —
+// would be re-migrated on every run.
+func TestAdoptLegacyNames_PersistsBothStores(t *testing.T) {
+	dir := t.TempDir()
+	tmPath, pbPath := filepath.Join(dir, "trackmap.json"), filepath.Join(dir, "pb.json")
+	const car, track = "Global Mazda MX-5 Cup", "Hockenheimring Baden-Württemberg"
+	legacyTrack := "Hockenheimring Baden-W\uFFFDrttemberg"
+
+	tmf := trackmap.TrackMapFile{legacyTrack: {SessionsUsed: 1}}
+	pbf := pb.File{pb.Key(car, legacyTrack): {LapTime: 110, Car: car, Track: legacyTrack}}
+	meta := analysis.SessionMeta{CarScreenName: car, TrackDisplayName: track}
+
+	adoptLegacyNames(tmf, tmPath, pbf, pbPath, meta)
+
+	gotTM, err := trackmap.Load(tmPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := gotTM[track]; !ok {
+		t.Errorf("trackmap.json not migrated on disk: %v", gotTM)
+	}
+	gotPB, err := pb.Load(pbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := gotPB[pb.Key(car, track)]; e == nil || e.LapTime != 110 {
+		t.Errorf("pb.json not migrated on disk: %v", gotPB)
+	}
+}
+
+func TestAdoptLegacyNames_NothingToDoWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	tmPath, pbPath := filepath.Join(dir, "trackmap.json"), filepath.Join(dir, "pb.json")
+	meta := analysis.SessionMeta{CarScreenName: "MX-5", TrackDisplayName: "Watkins Glen"}
+
+	adoptLegacyNames(trackmap.TrackMapFile{}, tmPath, pb.File{}, pbPath, meta)
+
+	for _, p := range []string{tmPath, pbPath} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s written with nothing to migrate", filepath.Base(p))
 		}
 	}
 }

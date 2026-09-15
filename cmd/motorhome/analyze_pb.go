@@ -43,6 +43,7 @@ func runStoredPBNoIBT(pbPath string, jsonMode bool) {
 // the .ibt's session YAML. Errors out if no PB exists for that combination.
 func runStoredPBForCarTrack(pbPath, car, track string, jsonMode bool) {
 	pbf := loadPBOrDie(pbPath)
+	pb.AdoptLegacyKey(pbf, car, track) // in memory only: a read shouldn't rewrite pb.json
 	entry := pbf[pb.Key(car, track)]
 	if entry == nil {
 		analyzeDie("no stored PB for %q on %q — drive a flying lap to set one", car, track)

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+
+	"github.com/rickymw/MotorHome/internal/textenc"
 )
 
 // TrackRef holds reference metadata for a known track. Used to guide
@@ -58,8 +60,8 @@ func LoadTrackRef(path string) (TrackRefFile, error) {
 // Corners returns the expected corner segment count for the given track, and
 // whether a reference exists.
 func (trf TrackRefFile) Corners(trackName string) (int, bool) {
-	ref, ok := trf[trackName]
-	if !ok || ref == nil {
+	ref := trf.lookup(trackName)
+	if ref == nil {
 		return 0, false
 	}
 	return ref.Corners, true
@@ -68,11 +70,25 @@ func (trf TrackRefFile) Corners(trackName string) (int, bool) {
 // CornerNames returns the hand-annotated corner labels for a track, or nil if
 // none are configured.
 func (trf TrackRefFile) CornerNames(trackName string) []string {
-	ref, ok := trf[trackName]
-	if !ok || ref == nil {
+	ref := trf.lookup(trackName)
+	if ref == nil {
 		return nil
 	}
 	return ref.CornerNames
+}
+
+// lookup finds the entry for trackName, falling back to its pre-decoding form
+// (textenc.LegacyJSONName). trackref.json is hand-edited and never written by
+// the tool, so it cannot be migrated the way trackmap.json is — and a key
+// copied out of an old trackmap.json would carry the U+FFFD form.
+func (trf TrackRefFile) lookup(trackName string) *TrackRef {
+	if ref := trf[trackName]; ref != nil {
+		return ref
+	}
+	if legacy := textenc.LegacyJSONName(trackName); legacy != trackName {
+		return trf[legacy]
+	}
+	return nil
 }
 
 // CountCorners returns how many of segs are corners or chicanes — the segments

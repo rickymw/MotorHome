@@ -700,6 +700,7 @@ go test -tags e2e -v ./internal/launcher/ -run TestE2E_FullStack -timeout 120s  
 | `internal/config` | Config loading and validation | [README](internal/config/README.md) |
 | `internal/launcher` | Process spawn/kill/status via `tasklist`/`taskkill` | [README](internal/launcher/README.md) |
 | `internal/ibt` | Low-level `.ibt` binary parser | [README](internal/ibt/README.md) |
+| `internal/textenc` | Decodes iRacing's Windows-1252 session YAML to UTF-8 | [README](internal/textenc/README.md) |
 | `internal/analysis` | Lap extraction, phase-based segment stats, brake entry detection, sector times, consistency, note placement, setup diff | [README](internal/analysis/README.md) |
 | `internal/trackmap` | GPS-based corner detection; `trackmap.json` store | [README](internal/trackmap/README.md) |
 | `internal/pb` | Personal best tracking; `pb.json` store (managed via `motorhome pb`) | [README](internal/pb/README.md) |

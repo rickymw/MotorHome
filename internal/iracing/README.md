@@ -17,7 +17,7 @@ iRacing exposes a named shared memory segment (`Local\IRSDKMemMapFileName` — e
 5. Reads `SessionTime` (float64) and `LapDistPct` (float32) from that buffer
 6. Reads the `CarIdx*` arrays (64-wide) for every other car's position/lap/estimated time
    and the player-car scalars through `scalarReader`, whose accessors check the variable's type and report absence rather than returning zero
-7. Parses `TrackDisplayName`, `CarScreenName`, `DriverCarIdx`, and the full `Drivers` list from the session info YAML embedded in shared memory
+7. Parses `TrackDisplayName`, `CarScreenName`, `DriverCarIdx`, and the full `Drivers` list from the session info YAML embedded in shared memory, after decoding it from Windows-1252 to UTF-8 (`textenc.Decode`) — the same encoding iRacing uses in `.ibt` files
 
 Array data is copied into Go slices before the memory view is unmapped so callers can use it after `ReadLiveData` returns.
 

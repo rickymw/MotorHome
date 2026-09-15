@@ -8,6 +8,8 @@ import (
 	"strings"
 	"syscall"
 	"unsafe"
+
+	"github.com/rickymw/MotorHome/internal/textenc"
 )
 
 // LiveData holds a snapshot of iRacing live telemetry.
@@ -209,7 +211,8 @@ func ReadLiveData() LiveData {
 	sessionInfoLen := int(readInt32(base, hdrOffSessionInfoLen))
 	if sessionInfoLen > 0 && sessionInfoLen < maxSessionInfoBytes {
 		raw := (*[maxSessionInfoBytes]byte)(unsafe.Add(base, sessionInfoOff))[:sessionInfoLen]
-		yaml := strings.TrimRight(string(raw), "\x00")
+		// Windows-1252 on the wire, like the .ibt copy — see internal/textenc.
+		yaml := textenc.Decode(strings.TrimRight(string(raw), "\x00"))
 		ld.Track = yamlField(yaml, "TrackDisplayName")
 		ld.Car = yamlField(yaml, "CarScreenName")
 		ld.MyCarIdx = DriverCarIdxFromYAML(yaml)

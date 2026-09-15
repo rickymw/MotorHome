@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/rickymw/MotorHome/internal/textenc"
 )
 
 // ErrInvalidFormat is returned when the file fails structural validation.
@@ -179,7 +181,9 @@ func parse(f *os.File) (*File, error) {
 		if _, err := f.Read(buf); err != nil {
 			return nil, fmt.Errorf("ibt: reading session info: %w", err)
 		}
-		sessionInfo = string(bytes.TrimRight(buf, "\x00"))
+		// iRacing writes this YAML in Windows-1252; decode it once here so every
+		// name parsed from it is valid UTF-8 and survives a JSON round trip.
+		sessionInfo = textenc.Decode(string(bytes.TrimRight(buf, "\x00")))
 	}
 
 	// 4. Read variable headers.
@@ -257,7 +261,8 @@ func (f *File) DiskHeader() DiskHeader {
 	return f.diskHdr
 }
 
-// SessionInfo returns the raw YAML session info string (null bytes trimmed).
+// SessionInfo returns the session info YAML (null bytes trimmed), decoded from
+// iRacing's Windows-1252 to UTF-8.
 func (f *File) SessionInfo() string {
 	return f.sessionInfo
 }
