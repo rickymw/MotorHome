@@ -45,7 +45,8 @@ func TestBuildCoachBrief_Structure(t *testing.T) {
 
 	for _, want := range []string{
 		"# Coaching brief — Porsche 718 GT4 at Phillip Island",
-		"Top 3 Actions",
+		"Focus for the next run",
+		"rather than T-numbers",
 		"## Session",
 		"# Framework",
 		"FRAMEWORK BODY HERE",

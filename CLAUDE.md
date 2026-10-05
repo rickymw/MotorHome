@@ -135,7 +135,7 @@ When the user asks to be coached, to analyse their session, or to review a lap, 
 .\motorhome.exe coach session.ibt  # a specific file
 ```
 
-That emits one self-contained brief: session orientation (including a `Gaps:` line naming what is missing), the full `coach.md` framework inline, and the analysis as JSON. **There is no second step — do not separately read `coach.md` or run `analyze`.** Deliver per-segment findings and a **Top 3 Actions** list.
+That emits one self-contained brief: session orientation (including a `Gaps:` line naming what is missing), the full `coach.md` framework inline, and the analysis as JSON. **Do not separately read `coach.md`.** The one extra call is `analyze -json`, for the segment geometry `coach` trims — it is needed to describe corners by landmarks. Follow the `session-review` skill (`.claude/skills/session-review/SKILL.md`): the driver is club level, so deliver one to three easy, physical fixes in plain language, name every corner by landmark ("the hairpin", "the big stop at the end of the long straight") rather than by its positional T-number, and end with one **Focus for the next run**. T-labels go only in a closing footnote, for follow-up `-segment` runs.
 
 When a finding needs the samples rather than the aggregates — pedal timing, where the brake release actually happens, which lap's throttle came in late — re-run focused on that corner:
 

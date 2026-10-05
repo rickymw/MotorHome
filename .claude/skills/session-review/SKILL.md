@@ -1,117 +1,221 @@
 ---
 name: session-review
-description: Review an iRacing session from MotorHome telemetry as a race engineer — validate the data for accuracy first, then deliver the top 3 driving issues with impact and driver-executable fixes, up to 3 setup changes the car actually allows, and up to 3 questions about how corners felt. Use when the user asks to review, coach, analyse, or debrief a session, lap, or stint.
+description: Debrief an iRacing session from MotorHome telemetry the way a club-level driving coach would — check the data quietly, then give one to three simple, physical things to try next run, with every corner described by what it is and where it sits relative to the circuit's landmarks (the hairpin, the long straight) rather than by detected T-numbers. Use when the user asks to review, coach, analyse, or debrief a session, lap, or stint.
 ---
 
 # Session review
 
-A debrief, not a data dump. Four things, in order: **validate**, **diagnose**, **prescribe**, **ask**.
+## Who you are coaching
+
+A club-level driver who is still building the fundamentals. They do not read
+telemetry tables and they are not going to. They will be in the car, at speed,
+with one or two things in their head. Advice they can't picture from the
+driver's seat does not get used.
+
+The goal of every debrief: **the driver leaves knowing one to three things to
+try on the next run, where on the track to try them, and how they'll know
+whether it worked.** Everything else in the data is your working, not theirs.
+
+This skill replaces the delivery format in the coach brief's own header and in
+`coach.md` Step 3 wherever they differ. Use `coach.md`'s checklist to *find*
+problems; use this skill to decide which ones to *say* and how to say them.
 
 ## 1. Get the data
 
 ```powershell
-.\motorhome.exe coach
+.\motorhome.exe coach               # the brief: orientation, framework, analysis JSON
+.\motorhome.exe analyze -json       # also needed: segment geometry, which coach trims
 ```
 
-One self-contained brief: orientation, the coaching framework, and the analysis JSON. Do **not** separately read `coach.md` or run `analyze` for the same session — `coach` already contains both.
+The `trackMap.segments` array in the `analyze -json` output (`kind`, `entryM`,
+`exitM`, `entryPct`, `exitPct`) is what you build the landmark map from in
+step 3. The brief alone does not carry it.
 
-Pull these alongside it, because the validation step needs them:
+## 2. Check the data — quietly
 
-```powershell
-.\motorhome.exe analyze                    # human tables + the Map/Turns lines
-.\motorhome.exe analyze -json              # per-segment entryPct/exitPct geometry (coach trims this)
-.\motorhome.exe analyze -lap <N> -json     # any lap you need to cross-check
-```
+Do these checks yourself. The driver hears about them only when the result
+changes what you can tell them, and then in one plain sentence.
 
-The setup lives in `pb.json` under the `"<Car>|<Track>"` key's `setup` field, as the raw `CarSetup:` YAML block. Read it — it is the authoritative list of what this car can adjust.
+- **Lap times add up.** Each lap's sector times should sum to its lap time
+  within ~20 ms. If the tool printed a rejected-lap-time warning on stderr,
+  tell the driver in plain words: *"Lap 4 shows as 1:50.9 here but iRacing
+  says 1:57.0 — iRacing's figure was wrong, the car really did a 1:50.9."*
+  That is the one check that must always be mentioned when it fires, because
+  their own lap times will otherwise disagree with this debrief.
+- **Out and in laps aren't real lap times.** Never quote one.
+- **Enough laps.** With fewer than three clean laps, say *"only a couple of
+  clean laps, so treat this as a first look"* and avoid any finding about
+  consistency.
+- **Map maturity.** `confidence: low` or a corner count well off iRacing's
+  `Turns:` figure means corner boundaries are rough. You can still coach — the
+  landmark approach in step 3 is designed for this — but don't make a finding
+  that depends on exactly where one corner ends and the next begins.
+- **Tiny phases are noise.** Under ~20 samples (a third of a second), ignore
+  the percentage columns for that phase.
+- **A corner with entry and mid but no exit row** means two corners' braking
+  got merged. Describe them as one section of track ("the two quick bends
+  after the hairpin"), never as two separate problems.
+- **Cold tyres.** A short run never gets tyres into their working range. Don't
+  build anything on tyre temperatures from one.
 
-## 2. Validate before you coach
+## 3. Map the track in landmarks before writing anything
 
-Telemetry lies in specific, repeatable ways. Run every check. Report what fails; say plainly which findings it weakens.
+Corner detection is imperfect and its `T1`, `T2`… labels are positional, not
+the official turn numbers, so **never use a T-number as the way you name a
+corner to the driver.** Build a small landmark map from the data first, then
+describe every corner relative to it.
 
-**Lap times reconcile with sectors.** Sum each lap's sector times and compare to its reported lap time; a clean lap agrees within ~20 ms. `sum(sampleCount over all phases) / 60` is the lap's true duration and settles any dispute.
+**Find the landmarks** (from `trackMap.segments` + the phase rows):
 
-The tool now rejects a `LapLastLapTime` more than 0.5 s from the lap's sample span and warns on stderr with both values. **Read that warning out to the user** — their lap time in the iRacing UI and in Garage61 will not match what the tool prints, and the warning is the only thing connecting the two. Do the reconciliation anyway: it also catches sector data that is wrong for other reasons.
+| Landmark | How to find it |
+|---|---|
+| The start/finish straight | the straight segment spanning `0%` / the wrap from the last segment to the first |
+| The longest straight | the straight with the largest `exitM − entryM`, or the highest straight `peakSpeedKph` |
+| The slowest corner | the corner with the lowest minimum speed. Call it "the hairpin" if it's well under ~90 km/h with large steering lock; otherwise "the slowest corner" |
+| The big stop | the corner with the biggest speed drop on the way in — usually at the end of the longest straight |
+| The fastest corner | the corner with the highest minimum speed |
 
-**Out/in lap times are not real lap times.** If an out lap looks faster than the best flying lap, the recording started mid-lap. Check fuel: a lap that burned half what a flying lap burned covered half the track. Never quote a partial lap's time.
+**Describe each corner you mention with three things:**
 
-**Brake-entry points can cascade.** `ComputePhases` moves each corner's start back to its stored brake-entry `pct` (`pb.json` → `brakeEntries`) and clamps the *previous* segment's exit to it. An onset that lands inside the *previous corner* — linked corners sharing one continuous brake application — moves samples between corners and can erase the earlier corner's exit phase entirely.
+1. **Where it is relative to a landmark** — "the first corner after the long
+   back straight", "the corner just before the hairpin", "the last corner
+   onto the start/finish straight".
+2. **What kind of corner it is**, in speeds the driver will recognise —
+   "a heavy stop from about 230 down to 95", "a fast sweeper you take at about
+   160", "a slow, tight one".
+3. **Roughly how far round the lap** — "about a third of the way round" —
+   as a tiebreaker when the first two aren't enough.
 
-Both the detector and the reader now bound that extension at the previous corner's exit, so this should no longer occur. Verify rather than assume: **a corner with entry and mid but no `exit` row is the tell.** If you see one, compare `brakeEntries[T].pct` against the previous corner's span from `analyze -json`, and name the pair as a complex ("the T6/T7 complex") rather than attributing to one corner.
+Example: *"the big stop at the end of the long back straight — you're braking
+from about 240 down to 100, roughly two-thirds of the way round."*
 
-The *events* — lockups, wheelspin, coast — are real sample counts wherever they land. A correct fix redistributes them between segments and leaves the lap totals identical; if a total changes, something else moved.
+Rules:
 
-**Sanity-check segment spans.** `sampleCount / 60` should roughly equal `(exitM - entryM) / meanSpeed`. A phase whose `peakSpeedKph` is well above both its entry and exit speed is spanning more than one corner. Note that a corner's phase rows legitimately cover more than its geometric span — the brake onset extension is deliberate — while `-dump` and `-trace` use geometric entries, so the two disagreeing is by design, not a bug.
+- **Left/right is not in the data.** Don't state a direction unless you are
+  certain of it from your own knowledge of the circuit.
+- **Official corner names** ("Turn 1", "the Corkscrew") only when you're sure
+  of the track *and* the speed and position in the data match that corner.
+  If you're not sure, describe it instead. A wrong name sends the driver to
+  the wrong corner, which is worse than no name.
+- If the segment names in the data are already real names (from
+  `cornerNames` in `trackref.json`), use them.
+- When detection has probably split or merged corners, describe the section of
+  track, not the individual pieces: "the fast left-right sequence before the
+  pits" rather than "T7 exit and T8 entry".
+- Put the detected labels **only** in a one-line footnote at the end, so the
+  driver can ask to dig deeper: *"(for a follow-up: hairpin = T5, big stop =
+  T9)"*.
 
-**Small-N phases are noise.** Under ~20 samples (0.33 s) the percentage columns are meaningless. Say so rather than reporting "100% on brake" from 9 samples.
+## 4. Choose what to coach — easy wins first
 
-**Map maturity gates everything.** `confidence: low` with `lapsUsed: 1` means the segmentation came from a single lap. Compare the detected corner count against iRacing's `Turns:` line. Recommend more clean laps then `analyze -update-map` before trusting corner-level attribution.
+Rank candidates by **easy to do × how many corners it applies to × time it
+costs**, not by time alone. A habit that shows up at five corners and fixes
+itself once the driver notices it beats a tenth of a second hidden in one
+corner's brake release.
 
-**Consistency needs laps.** Two laps is a difference, not a spread. Check whether the comparison lap had an off — a 100% `PkBrk` on a **straight** row is a brake stab, a spin, or traffic, and disqualifies that lap as a reference.
+At this level, look for these, roughly in this order:
 
-**Tyres need heat before they mean anything.** Judge camber or pressure only once surface temps are in the working range. A short run shows cold tyres, and cold tyres always read as "wrong camber". Say the data isn't there yet rather than prescribing from it.
+1. **Coasting** — time with neither pedal pressed (`coastSeconds`). The
+   commonest and easiest win: go straight from one pedal to the other.
+2. **Inconsistent braking point** — entry speed varying a lot lap to lap
+   (`entrySpeedSdKph` in the consistency rows). Fix: pick one fixed marker
+   and use it every lap.
+3. **Late or hesitant throttle on exit** — slow exit followed by a lower peak
+   speed down the next straight (`exitImpact`). Biggest payoff before long
+   straights.
+4. **Lock-ups at the big stop** — `lockupSamples` together with 100% peak
+   brake. Fix: press slightly less hard at the start of the stop.
+5. **Wheelspin on exit** — `wheelspinSamples`. Fix: squeeze the throttle on
+   instead of stabbing it, or wait until the wheel is straighter.
+6. **Not flat on a straight** — throttle below 100% where there's no corner.
 
-**Cross-check the physical numbers.** Corner weights should sum to the car's known mass; `(LF+RR)/total` should match the reported `CrossWeight`; the front/rear split should match the car's known distribution; the loaded side should run hotter for the track's direction. When these line up, say so — it is evidence the pipeline is sound, and it earns trust for the findings that follow.
+**Leave out at this level** unless the driver asks: lateral G, steering
+corrections, detailed trail-braking shape, rotation, tyre temperatures and
+pressures, and small gains spread across many corners.
 
-## 3. Diagnose — top 3 issues
+**One to three items. One is fine.** If one thing clearly matters most, give
+only that. Three things the driver half-remembers are worth less than one they
+actually do.
 
-Three, ranked by time cost. For each: **what the data shows**, **what it costs**, **what to do**.
+## 5. Write it simply
 
-Quantify from the totals, not from one row: sum coast seconds, lockup samples and wheelspin samples across the lap, and give them as seconds (`samples / 60`) and as a share of the lap. Prefer an internal anchor over an invented benchmark — "T5 shows you can do this; T6 is where you don't" beats a made-up target lap time. When you estimate lap time cost, give a range and say it is an estimate.
+Use this format:
 
-Note that `Lock` fires at 5% slip, which is near the optimal braking slip ratio — a high count alone does not prove over-braking. It becomes a finding when paired with 100% peak brake, ABS activity, and coast immediately afterwards.
+> **How it went** — two or three sentences: best lap, whether laps were
+> consistent, and one true thing they're doing well. (Plus the one-line data
+> caveat from step 2, if there is one.)
+>
+> **1. [What to do, as a short plain instruction — e.g. "Go straight from brake to throttle"]**
+> - **Where:** the corner, described with landmarks (step 3).
+> - **What's happening:** one or two sentences, with at most one number.
+> - **Try this:** one physical action, tied to something they can see or feel.
+> - **You'll know it's working when:** one thing they'll feel, and one number
+>   that should move next time.
+>
+> *(up to 3 of these)*
+>
+> **Focus for the next run:** one sentence — the single thing to think about.
 
-## 4. Prescribe — fixes the driver can execute
+**Language rules:**
 
-**A fix is a pedal or a marker, not an outcome.** The driver cannot execute "slide less", "carry more speed", "be smoother", or "use the grip". They can execute:
+- **No column names or sample counts.** Not `PkBrk`, `LatG`, `lockupSamples`
+  or "116 samples". Convert to plain units: seconds, km/h, metres.
+- **No phase jargon.** "Entry" is "as you brake and turn in", "mid" is "in the
+  middle of the corner", "exit" is "as you unwind the wheel and get on the
+  power".
+- **Short sentences.** If a term is unavoidable, explain it once.
+- **Numbers are for comparison, not decoration.** "You're about 15 km/h
+  slower out of the hairpin than on your best lap" is useful; three decimal
+  places of standard deviation is not.
+- **Time estimates are rough and rare.** Say "roughly half a second a lap"
+  once, for the main item, not a range for every item.
 
-- brake earlier / later, by a stated amount or marker
-- brake with less / more peak pressure
-- release the brake sooner / hold it longer into the corner
-- get to throttle earlier / later, at a stated point
-- take one gear higher / lower
-- wait for a stated amount of unwind before going past a stated throttle percentage
+**A fix is something to do with a pedal, the wheel or your eyes — never an
+outcome.** "Carry more speed", "be smoother", "use more grip" and "work on
+trail-braking" can't be done from the seat. These can:
 
-Name the corner, the phase, and the pedal. One sentence each.
+- brake at a marker ~20 m earlier/later (use `entryM` differences when the
+  data supports a distance; otherwise "a bit earlier — pick a board, a kerb or
+  a mark on the track you can see every lap")
+- press the brake a little less hard at the start of the stop
+- ease off the brake gradually as you turn in, instead of letting go all at once
+- get back to the throttle as soon as you've stopped adding steering
+- squeeze the throttle on rather than stabbing it
+- use one gear lower / higher
+- look further ahead — to the apex or exit — earlier
 
-### Every recommendation carries a watch item
+## 6. Setup — usually skip it
 
-A change the driver cannot evaluate is a change they will keep or discard at random. For **each** fix and **each** setup change, say — in one line — what to look for, **in which named corner**, and what would mean back it out:
+At this level, technique is almost always the bigger and cheaper gain, and a
+setup change makes the next session harder to read. **Default to no setup
+change** and say so briefly if the driver might expect one.
 
-- **Where:** the specific corner the effect should show up in first, which is not always the corner the problem was measured in. A rotation change shows up wherever the driver currently carries the most lock; a braking change shows up at the heaviest stop.
-- **Look for:** what confirms it worked, ideally something they can feel *and* something the next run's telemetry will show (a phase row, a column, a direction of movement).
-- **Look out for:** the specific way it could go wrong, named as a feel in a named corner — that is the signal to revert.
+Only suggest one if there's a clear car problem technique can't fix. Then:
+**one change only**, using a field that exists in this car's `CarSetup:`
+block in `pb.json` (it differs enormously between cars), explained in plain
+words — what to change, which way, what it should feel like, and how to put it
+back.
 
-Give the telemetry check as a column and a direction, not a target number, unless the data supports one.
+## 7. Ask about feel — only if it helps
 
-### Setup changes
-
-Up to three, and **recommending none is a valid answer.** Say so plainly when the data does not support a change: too few laps, tyres never up to temperature, or a problem that is plainly a technique problem wearing a setup problem's clothes. A driver who changes the car to fix their own brake release has to unwind two variables next session instead of one. When in doubt, fix the driving first and re-measure — say that, and say what would have to show up in the next run to justify touching the car.
-
-**Only fields that appear in this car's `CarSetup:` YAML** — that block is the ground truth for what iRacing exposes on this car, and it differs enormously between cars (an MX-5 Cup has no brake bias; a GT car has ARB blades and a wing). Never suggest an adjustment that is not in the block.
-
-For each: the field, the current value, the direction, why the data points there, the risk, and the watch item above. **One change at a time**, and say which to do first — two changes at once means neither is attributable. Where a change trades one measured problem against another (helping rotation while the car is already spinning the rears), say so and make it conditional on the driver's answer about feel.
-
-## 5. Ask — up to 3 questions about feel
-
-Ask only where the answer would change the prescription — usually to separate two hypotheses the telemetry cannot: understeer versus oversteer, over-slowing versus instability, a car problem versus a reference-point problem.
-
-Ask about **feel in a named corner**, never about data the tool already has. Use `AskUserQuestion` with concrete options phrased the way a driver would describe it ("it wouldn't turn and I was waiting for the nose" / "it was loose and I was catching it").
+At most one or two questions, and only when the answer changes what you'd tell
+them. Use `AskUserQuestion`, name the corner with landmarks, and phrase the
+options the way a driver would say them: *"the car wouldn't turn, I was waiting
+for the front"* / *"the back felt loose and I was catching it"* / *"it felt
+fine, I just wasn't confident"*.
 
 ## Going deeper
 
-Once the aggregates have named the corner, get the samples:
+If the driver wants more on one corner, translate the landmark back to its
+detected label and run:
 
 ```powershell
-.\motorhome.exe coach -segment T3            # or T3,T4 — brief narrowed to those corners
-.\motorhome.exe coach -segment T3 -hz 20     # if the trace is too large
-.\motorhome.exe analyze -dump T8 -dump-all   # same corner, every comparable lap, as CSV
+.\motorhome.exe coach -segment T5           # or T5,T6 for a section
+.\motorhome.exe coach -segment T5 -hz 20    # if the trace is too large
 ```
 
-Read the trace for the moments the aggregates hide: where brake release meets steering input, the time offset where throttle first opens, a second brake application mid-corner, steering that goes back up after starting to unwind. A focused brief carries a `Focus:` line — do not characterise the lap as a whole from it.
-
-Below 60 Hz, `ABS` and `Coast` are 1 if the event occurred anywhere in the window the row covers, not at that instant.
-
-## Corner names
-
-Detected labels are **positional** (`T1`, `T2`, …), not iRacing's official turn numbers, and detection merges complexes so the counts differ. Do not assert official names or numbers you are not sure of — describe corners by what the data shows (distance from S/F, entry speed, minimum speed, direction). If the user wants real names, add `cornerNames` to the track's `trackref.json` entry: one entry per **detected** corner, in track order, or nothing is renamed.
+A focused brief carries a `Focus:` line — every other corner has been removed,
+so don't describe the whole lap from it. Below 60 Hz, `ABS` and `Coast` are 1
+if the event happened anywhere in that row's window. Report what the trace
+shows in the same plain format as above: where, what's happening, one thing to
+try.

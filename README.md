@@ -206,9 +206,9 @@ Claude can run the analysis and deliver structured coaching feedback automatical
 > "Coach me on my latest session"
 > "Analyse my last session and give me coaching feedback"
 
-Claude runs `coach`, which emits one self-contained brief — session orientation, the `coach.md` framework, and the analysis as JSON — and delivers per-segment findings and a **Top 3 Actions** list. It's a single command; there's no separate `analyze` run or `coach.md` read.
+Claude runs `coach`, which emits one self-contained brief — session orientation, the `coach.md` framework, and the analysis as JSON — and delivers a plain-language debrief pitched at a club-level driver: one to three easy things to try next run, each with where, what to do and how you'll know it worked, ending with a single **Focus for the next run**. Corners are described by landmarks ("the big stop at the end of the long back straight") rather than detected T-numbers, because detection is positional and imperfect; the T-labels appear only in a footnote for follow-up questions. The `session-review` skill (`.claude/skills/session-review/`) carries the full rules.
 
-Once that names the corner costing the most, ask it to go deeper on that one — `coach -segment T3` narrows the brief and inlines the corner's sample-level telemetry, so the answer moves from "your T3 exit varies" to which lap did what, and when.
+Once that names the corner costing the most, ask it to go deeper on that one — `coach -segment T3` narrows the brief and inlines the corner's sample-level telemetry, so the answer moves from "that corner's exit varies" to which lap did what, and when.
 
 ---
 
@@ -271,7 +271,8 @@ Emits a single self-contained brief — session orientation, the full `coach.md`
 # Coaching brief — Porsche 718 Cayman GT4 at Phillip Island Circuit
 
 You are the race engineer. Read the framework, then the session data below,
-and deliver per-segment findings followed by a **Top 3 Actions** list.
+and deliver a plain-language debrief: one to three easy fixes, corners described by
+landmarks (the hairpin, the long straight) rather than T-numbers, and a **Focus for the next run**.
 
 ## Session
 

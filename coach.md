@@ -120,19 +120,25 @@ Work through the phase table using the checklist below, in priority order. Skip 
 
 ## Step 3 — Deliver findings
 
-For each segment with a meaningful finding, write one line in this format:
+The driver is club level and reads the debrief, not the tables. The checklist above is for *finding* problems; only one to three of them get said, chosen by **easy to do × how many corners it applies to × time it costs**: coasting, an inconsistent braking point, hesitant exit throttle, lock-ups at the big stop and wheelspin come before anything subtler.
 
-> **T3 entry** — 116 lockup samples (1.9s) under heavy braking. Peak brake at 100% with entry speed dropping from 212→101 km/h. Trail-braking technique needs refinement — try less initial brake pressure and a longer, lighter trail into the turn.
+**Name corners by landmarks, never by T-number.** Detected labels are positional and detection merges and splits corners, so `T3` means nothing to the driver and may not match the official Turn 3. Find the circuit's landmarks in the data — the start/finish straight, the longest straight, the slowest corner (the hairpin), the biggest stop, the fastest corner — and describe each corner you mention by where it is relative to one, what kind of corner it is in speeds ("a heavy stop from 230 to 95"), and roughly how far round the lap. Left/right is not in the data. Use an official corner name only when you're sure it matches. Put the detected labels in a one-line footnote at the end, for follow-up questions only.
 
-Then end with:
+Format:
 
----
+> **How it went** — two or three sentences: best lap, consistency, one thing done well.
+>
+> **1. Go straight from brake to throttle**
+> - **Where:** the slow corner just after the long back straight — you brake from about 220 down to 85, roughly halfway round.
+> - **What's happening:** after you let go of the brake there's about half a second with neither pedal pressed, before you're back on the power.
+> - **Try this:** as soon as you've stopped adding steering, start squeezing the throttle — even a little.
+> - **You'll know it's working when:** the car feels settled through the middle rather than floating; the coast time here drops next run.
+>
+> *(up to three items — one is fine)*
+>
+> **Focus for the next run:** one sentence.
 
-### Top 3 Actions
-
-Rank the three highest-impact improvements the driver should focus on next session. Each one sentence, specific and actionable. Lead with the segment name and phase.
-
----
+No column names or sample counts in the debrief — convert to seconds, km/h and metres. A fix is something done with a pedal, the wheel or the eyes ("brake at a marker a bit earlier", "press less hard at the start of the stop"), never an outcome ("carry more speed", "refine your trail-braking"). Setup changes are usually not worth suggesting at this level; if one is, give one, and only for a field in this car's `CarSetup:` block.
 
 ## Multi-lap comparison
 

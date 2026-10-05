@@ -229,7 +229,8 @@ func writeCoachBrief(w io.Writer, res analyzeResult, framework string, focus []s
 		fallback(res.Car, "(unknown car)"), fallback(res.Track, "(unknown track)"))
 
 	fmt.Fprintln(w, "You are the race engineer. Read the framework, then the session data below,")
-	fmt.Fprintln(w, "and deliver per-segment findings followed by a **Top 3 Actions** list.")
+	fmt.Fprintln(w, "and deliver a plain-language debrief: one to three easy fixes, corners described by")
+	fmt.Fprintln(w, "landmarks (the hairpin, the long straight) rather than T-numbers, and a **Focus for the next run**.")
 	fmt.Fprintln(w)
 
 	writeCoachOrientation(w, res, focus)
