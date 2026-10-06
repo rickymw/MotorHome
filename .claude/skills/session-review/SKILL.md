@@ -1,6 +1,6 @@
 ---
 name: session-review
-description: Debrief an iRacing session from MotorHome telemetry the way a club-level driving coach would — check the data quietly, then give one to three simple, physical things to try next run, with every corner described by what it is and where it sits relative to the circuit's landmarks (the hairpin, the long straight) rather than by detected T-numbers. Use when the user asks to review, coach, analyse, or debrief a session, lap, or stint.
+description: Debrief an iRacing session from MotorHome telemetry the way a club-level driving coach would — check the data quietly, work out what has changed on the car (including across tracks) and ask how it felt, then give one to three simple, physical things to try next run plus a setup suggestion when the car is doing something technique won't fix, with every corner described by what it is and where it sits relative to the circuit's landmarks (the hairpin, the long straight) rather than by detected T-numbers. Use when the user asks to review, coach, analyse, or debrief a session, lap, or stint.
 ---
 
 # Session review
@@ -16,6 +16,11 @@ The goal of every debrief: **the driver leaves knowing one to three things to
 try on the next run, where on the track to try them, and how they'll know
 whether it worked.** Everything else in the data is your working, not theirs.
 
+They also develop their own setup, deliberately and from feel, and carry it
+from track to track rather than resetting to baseline. Treat that as part of
+the session: find out what changed, credit what worked, and build on the
+direction they've chosen rather than second-guessing it from the data alone.
+
 This skill replaces the delivery format in the coach brief's own header and in
 `coach.md` Step 3 wherever they differ. Use `coach.md`'s checklist to *find*
 problems; use this skill to decide which ones to *say* and how to say them.
@@ -29,7 +34,7 @@ problems; use this skill to decide which ones to *say* and how to say them.
 
 The `trackMap.segments` array in the `analyze -json` output (`kind`, `entryM`,
 `exitM`, `entryPct`, `exitPct`) is what you build the landmark map from in
-step 3. The brief alone does not carry it.
+step 4. The brief alone does not carry it.
 
 ## 2. Check the data — quietly
 
@@ -48,7 +53,7 @@ changes what you can tell them, and then in one plain sentence.
   consistency.
 - **Map maturity.** `confidence: low` or a corner count well off iRacing's
   `Turns:` figure means corner boundaries are rough. You can still coach — the
-  landmark approach in step 3 is designed for this — but don't make a finding
+  landmark approach in step 4 is designed for this — but don't make a finding
   that depends on exactly where one corner ends and the next begins.
 - **Tiny phases are noise.** Under ~20 samples (a third of a second), ignore
   the percentage columns for that phase.
@@ -56,9 +61,47 @@ changes what you can tell them, and then in one plain sentence.
   got merged. Describe them as one section of track ("the two quick bends
   after the hairpin"), never as two separate problems.
 - **Cold tyres.** A short run never gets tyres into their working range. Don't
-  build anything on tyre temperatures from one.
+  read camber or pressures from one.
 
-## 3. Map the track in landmarks before writing anything
+## 3. Find out what changed on the car
+
+A setup change the review never notices is a change it can neither credit nor
+judge. Build the car's history before coaching:
+
+**Same track — this session against earlier ones:**
+
+```powershell
+.\motorhome.exe pb diff                       # this session vs this car/track's PB setup
+.\motorhome.exe pb diff "<older session>.ibt" # an earlier session at the same track
+```
+
+List the `.ibt` files in `ibtDir` to find earlier sessions at the same track.
+A change between two sessions **at the same track** is the only before/after
+the data can actually measure — compare the symptom it was meant to fix
+(wheelspin, lock-ups, consistency, the corner the driver complained about)
+across the two, and say what moved and what didn't.
+
+**Across tracks — the setup's evolution:** `pb diff` only compares within one
+car/track, so it cannot see a setup carried from the last circuit. Every PB
+entry in `pb.json` for the same car stores the `CarSetup:` it was set with.
+Pull the main adjustable fields (anti-roll bars, camber, toe, springs,
+pressures, brake bias, diff — whatever this car exposes) from each, order them
+by date, and you have the setup's history. Several tracks sharing identical
+values is probably the iRacing baseline.
+
+Cross-track comparisons **cannot measure an effect** — different circuits
+produce different numbers no matter what the car is doing. For those changes
+the driver's account of how the car felt is the evidence. Say so rather than
+reaching for numbers that can't answer the question.
+
+**Ask why, if you don't know.** The driver's reasoning ("the soft front bar
+gave me turn-in", "I added camber because the tyre temps said so") is part of
+the data. Evaluate the change against what it was *for*.
+
+Flag anything that looks unintended — one side of the car different from the
+other with no reason given — as a question, not a correction.
+
+## 4. Map the track in landmarks before writing anything
 
 Corner detection is imperfect and its `T1`, `T2`… labels are positional, not
 the official turn numbers, so **never use a T-number as the way you name a
@@ -106,7 +149,23 @@ Rules:
   driver can ask to dig deeper: *"(for a follow-up: hairpin = T5, big stop =
   T9)"*.
 
-## 4. Choose what to coach — easy wins first
+## 5. Ask how the car felt
+
+**Always ask at least one question**, unless the driver has already told you
+how the car felt this session. Telemetry can say the rear wheels slipped; only
+the driver can say whether that felt like the car stepping out or like a
+clean, controlled exit — and that difference decides between a technique fix
+and a setup one.
+
+At most two questions. Use `AskUserQuestion`, name the corner with landmarks,
+and phrase the options the way a driver would say them: *"the car wouldn't
+turn, I was waiting for the front"* / *"the back felt loose and I was catching
+it"* / *"it felt stable, I just wasn't confident"*. If step 3 turned up a
+change you don't know the reason for, that can be the second question.
+
+Ask **before** writing the debrief, so the answer shapes it.
+
+## 6. Choose what to coach — easy wins first
 
 Rank candidates by **easy to do × how many corners it applies to × time it
 costs**, not by time alone. A habit that shows up at five corners and fixes
@@ -126,18 +185,59 @@ At this level, look for these, roughly in this order:
 4. **Lock-ups at the big stop** — `lockupSamples` together with 100% peak
    brake. Fix: press slightly less hard at the start of the stop.
 5. **Wheelspin on exit** — `wheelspinSamples`. Fix: squeeze the throttle on
-   instead of stabbing it, or wait until the wheel is straighter.
+   instead of stabbing it, or wait until the wheel is straighter. If the
+   driver says the rear is stepping out despite a careful throttle, it is a
+   car problem — see step 7.
 6. **Not flat on a straight** — throttle below 100% where there's no corner.
 
-**Leave out at this level** unless the driver asks: lateral G, steering
-corrections, detailed trail-braking shape, rotation, tyre temperatures and
-pressures, and small gains spread across many corners.
+**Leave out of the driving advice at this level** unless the driver asks:
+lateral G, steering corrections, detailed trail-braking shape, and small gains
+spread across many corners. (Tyre temperatures and rotation belong to the car,
+in step 7 — not to the driving items.)
 
 **One to three items. One is fine.** If one thing clearly matters most, give
 only that. Three things the driver half-remembers are worth less than one they
 actually do.
 
-## 5. Write it simply
+## 7. Setup — when the car is the problem
+
+A car the driver can't trust can't be driven the same way twice, and then
+technique coaching has nothing to stand on. **Suggest a setup change when the
+car is doing something the driver can feel and technique won't fix** —
+instability on entry or exit, a rear that steps out under a careful throttle, a
+front that won't turn however the corner is approached. Instability the driver
+reports is evidence, not an excuse.
+
+Don't suggest one when the symptom is plainly the driver's (a lock-up at 100%
+pedal, coasting, a variable braking point) — changing the car to fix a driving
+habit leaves two things to unwind next session instead of one.
+
+When you do:
+
+- **Build on the driver's direction.** If they've been developing the setup a
+  particular way and it's working, the next step continues that line; don't
+  propose undoing it to get back to baseline.
+- **One change at a time**, and say which first. Two at once and neither can
+  be judged.
+- **Only fields in this car's `CarSetup:` block** (`pb.json`) — it differs
+  enormously between cars.
+- **Plain words:** what to change, which way, by how much (a click, not a
+  range), what it should feel like, and how to put it back.
+- **Say what to watch:** the corner it should show up in first, and the number
+  that should move — wheelspin out of the slow corners, lock-ups at the big
+  stop — next session at the *same* track.
+
+**Tyre temperatures for camber**: the analysis gives lap-averaged surface
+temperatures across each tyre (inner/middle/outer). They are a rough guide —
+an average blurs the corners where camber matters most — so use them for
+direction ("the inside is barely hotter than the outside, there's room for more
+camber"), not as a target. Only from a run long enough for the tyres to be in
+their working range.
+
+Recommending nothing is still a valid answer — when the car is behaving and the
+time is in the driving, say the setup is in a good place and why.
+
+## 8. Write it simply
 
 Use this format:
 
@@ -145,14 +245,19 @@ Use this format:
 > consistent, and one true thing they're doing well. (Plus the one-line data
 > caveat from step 2, if there is one.)
 >
+> **The car** — one to three sentences on what changed since last time and
+> what it appears to have done, grounded in what they told you and, where a
+> same-track comparison exists, what the data showed. Omit if nothing changed.
+>
 > **1. [What to do, as a short plain instruction — e.g. "Go straight from brake to throttle"]**
-> - **Where:** the corner, described with landmarks (step 3).
+> - **Where:** the corner, described with landmarks (step 4).
 > - **What's happening:** one or two sentences, with at most one number.
 > - **Try this:** one physical action, tied to something they can see or feel.
 > - **You'll know it's working when:** one thing they'll feel, and one number
 >   that should move next time.
 >
-> *(up to 3 of these)*
+> *(up to 3 of these — a setup change from step 7 takes one of the slots, in
+> the same shape)*
 >
 > **Focus for the next run:** one sentence — the single thing to think about.
 
@@ -183,26 +288,6 @@ trail-braking" can't be done from the seat. These can:
 - squeeze the throttle on rather than stabbing it
 - use one gear lower / higher
 - look further ahead — to the apex or exit — earlier
-
-## 6. Setup — usually skip it
-
-At this level, technique is almost always the bigger and cheaper gain, and a
-setup change makes the next session harder to read. **Default to no setup
-change** and say so briefly if the driver might expect one.
-
-Only suggest one if there's a clear car problem technique can't fix. Then:
-**one change only**, using a field that exists in this car's `CarSetup:`
-block in `pb.json` (it differs enormously between cars), explained in plain
-words — what to change, which way, what it should feel like, and how to put it
-back.
-
-## 7. Ask about feel — only if it helps
-
-At most one or two questions, and only when the answer changes what you'd tell
-them. Use `AskUserQuestion`, name the corner with landmarks, and phrase the
-options the way a driver would say them: *"the car wouldn't turn, I was waiting
-for the front"* / *"the back felt loose and I was catching it"* / *"it felt
-fine, I just wasn't confident"*.
 
 ## Going deeper
 

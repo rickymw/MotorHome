@@ -138,7 +138,7 @@ Format:
 >
 > **Focus for the next run:** one sentence.
 
-No column names or sample counts in the debrief — convert to seconds, km/h and metres. A fix is something done with a pedal, the wheel or the eyes ("brake at a marker a bit earlier", "press less hard at the start of the stop"), never an outcome ("carry more speed", "refine your trail-braking"). Setup changes are usually not worth suggesting at this level; if one is, give one, and only for a field in this car's `CarSetup:` block.
+No column names or sample counts in the debrief — convert to seconds, km/h and metres. A fix is something done with a pedal, the wheel or the eyes ("brake at a marker a bit earlier", "press less hard at the start of the stop"), never an outcome ("carry more speed", "refine your trail-braking"). Find out what has changed on the car before coaching — `pb diff` for the same track, and the same car's other `pb.json` entries for setup carried from earlier circuits — and ask the driver how it felt. Suggest a setup change when the car is doing something the driver can feel and technique won't fix (instability, a rear stepping out under a careful throttle); build on the direction they've already taken, one change at a time, and only for a field in this car's `CarSetup:` block.
 
 ## Multi-lap comparison
 
