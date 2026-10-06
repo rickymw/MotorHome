@@ -361,6 +361,14 @@ Placement uses the moment you *started* speaking, minus a small reaction-time al
 
 `pb.json` grows one entry per car/track and is never trimmed by `analyze`. These commands are the way to read it back.
 
+**A PB in a session you never analysed is still found.** Every `analyze` (and so every `coach`) first checks any session in `ibtDir` it hasn't looked at before, and saves a faster lap if one turns up:
+
+```
+New PB found in an earlier session: 1:39.954 — Mazda MX-5 Cup at Motorsport Arena Oschersleben, 2026-10-05 (was 1:40.040). Saved.
+```
+
+The first run reads the whole telemetry folder once (about 20 seconds for 80 sessions); `pbscan.json` remembers what has been checked, so later runs only read new sessions.
+
 `pb diff` answers the question that matters mid-session — *what have I changed since the lap I'm trying to beat?*
 
 ```

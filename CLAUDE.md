@@ -184,6 +184,7 @@ Key top-level fields:
 
 ### analyze subcommand flow (`cmd/motorhome/analyze.go`)
 1. Resolve `.ibt` path: explicit, numeric index into `ibtDir`, or most-recent
+   - **PB catch-up** (`pb_catchup.go`) runs here, before `pb.json` is read — see below
 2. Open `.ibt`; extract session metadata and laps
 3. Find best flying lap; filter flying laps to within 1.5s of best lap time (drops slow early-practice laps). Both best-lap selection and the within-time filter also reject laps shorter than 70% of the session's median flying-lap time (`plausibleLapMinTime`) — guards against a stitched/phantom `LapLastLapTime` value that iRacing occasionally publishes (e.g. after a session reset/recording gap), which would otherwise be picked as a sub-real "best lap" and corrupt the trackmap and PB. Floor only applies with 2+ flying laps. Laps flagged `IsCut` (gap in LapDistPct coverage — see Cut lap detection below) are also rejected here
 4. Load `trackmap.json`; detect from filtered laps if no entry exists (latlon → lataccel fallback)
@@ -193,6 +194,19 @@ Key top-level fields:
 
    `pb.Update` replaces the entry wholesale and preserves only `BrakeEntries` — the previous PB's `Phases`/`Setup` are dropped. That is deliberate: they describe a different, slower lap, and pairing them with the new lap time would make the record self-inconsistent. When a new PB is set with no track map available (so no replacement phases can be computed), a warning is printed to stderr, because the silent consequence is that the *next* session has no vs-PB table.
 8. Print: header (file, driver, car, track) → setup tables (Tyres + Suspension corners parsed from CarSetup YAML) → tyre summary (avg surface temps, end-of-lap wear, hot pressures, brake bias) → map line → PB line → lap list → sector table → phase table → vs PB delta table (if stored PB phases exist) → corner exit → straight peak table → consistency table → notes table → segment traces (only with `-trace`)
+
+### PB catch-up (`cmd/motorhome/pb_catchup.go`)
+`analyze` only ever records a PB from the one session it runs on, so a session nobody analysed was invisible — a real case: a 1:39.954 sat unrecorded behind a 1:40.040 "PB" until it was opened by accident. The first full run over the telemetry folder found five more (three genuine improvements, one first-ever PB, and a Lime Rock record of 1:44.333 that was really a 1:01.511 — the stored one had come from a messy lap).
+
+Before every `analyze` (and so every `coach` and GUI analysis), `catchUpPBs` reads each `.ibt` in `ibtDir` that isn't in the **`pbscan.json` ledger** and stores any lap faster than the PB for its car/track, with phases, setup and `SourceFile`. Each find prints one stderr line naming the session's date and the previous PB. Details that matter:
+
+- **The session being analysed is skipped**, and marked in the ledger by the main pipeline after its PB step. Recording its PB in the catch-up would make the vs-PB table compare the lap to itself — the pipeline captures the previous PB's phases before `pb.Update` replaces them.
+- **Selection is `bestAnalyzeLap`**, so the catch-up cannot store a lap the full analysis would reject (cut, phantom, out/in). Phases are computed against the stored map with `trackref.json` corner names applied, because vs-PB rows match by segment name; the map lookup falls back to the legacy U+FFFD key (`mapFor`), since the catch-up never saves `trackmap.json` and so cannot migrate it. That fallback is not optional — the first run without it stripped Hockenheim's PB of its phases.
+- **The ledger keys on basename + size + modification time.** A session still being recorded (iRacing holds it locked; the open fails with a warning) gets a new stamp when it grows, so it is checked again once finished. An unchanged unreadable file is not retried.
+- **A PB from a track with no map is stored without phases and says so.** `backfillPBPhases` fills them in on a later run from `SourceFile` once the track has a map — the map is created during an `analyze` *after* the catch-up has run, so this lands one run later. Without the backfill such a PB would have no vs-PB table until it was beaten.
+- **An unreadable `pb.json` stops the catch-up** rather than being overwritten with what the pass found.
+
+Cost: the first run reads the whole folder once (82 sessions / 2.1 GB took ~19s and prints a progress line above 3 sessions); after that, a directory listing and a ledger read (~0.8s for the whole `analyze`).
 
 ### Two lap populations
 Two different filtered lap sets exist and must not be conflated:
@@ -650,6 +664,7 @@ All live next to the binary in `G:\RACING\SimAppLauncher\`:
 | `trackmap.json` | auto on first `analyze` | segment geometry per track |
 | `trackref.json` | hand-edited | expected corner counts per track (guides detection) + `cornerNames` corner labels |
 | `pb.json` | auto on first `analyze` | personal best per car/track |
+| `pbscan.json` | auto on first `analyze` | sessions already checked for PBs by the catch-up (delete it to force a full re-check) |
 
 ## Deployment
 - Binary + config live in `G:\RACING\SimAppLauncher\` (the repo root)
@@ -683,6 +698,8 @@ All live next to the binary in `G:\RACING\SimAppLauncher\`:
 - GPS quantisation in iRacing is systematic (same rounding each lap) so averaging more laps does not reduce noise in the `latlon` method — mitigated by bin-averaging, wide triplet spacing, and post-detection validation (steering/speed confirmation)
 - Dynamic weather sessions do not populate `AirTemp` in the session YAML; PB weather shows track temp only in that case
 - Mis-encoded (U+FFFD) `trackmap.json`/`pb.json` keys from before the Windows-1252 fix are migrated only when `analyze` next runs on a session at that track. Until then `pb list` and the GUI's PB panel show the name with `�`, and `pb show`/`pb prune` filters must match that form
+- The PB catch-up runs only ahead of `analyze` (and `coach`/the GUI analysis, which go through it). `pb list`, `pb show` and the GUI's PB panel read `pb.json` as it stands, so a PB from an unanalysed session appears there only after the next analysis
+- `pb.json` keys by track display name, not layout. iRacing gives several layouts the same display name (Lime Rock's GP and chicane configs, Hockenheim GP and Outer), so the catch-up — like `analyze` before it — will compare laps from different layouts of one track for the same car. No layout on this rig is shared by one car yet
 - `analyze` never prunes `pb.json` — old car/track combos accumulate indefinitely until removed with `motorhome pb prune`
 - Voice notes are placed by wall clock, so their accuracy is bounded by `-note-lag` being an estimate; a note about a corner can land in the adjacent segment
 - `coach -segment` and `analyze -trace` need a track map to name corners against, so neither works on the first session at a new track (nothing to resolve `T3` to yet)

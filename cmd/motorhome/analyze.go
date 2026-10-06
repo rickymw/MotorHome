@@ -126,6 +126,10 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath, notesDir
 		os.Exit(1)
 	}
 
+	// Record any PB sitting in a session nobody analysed, before this run reads
+	// pb.json — so the PB line and vs-PB table below see the true best.
+	catchUpPBs(cfg.IbtDir, ibtPath, trackmapPath, pbPath, cfg.Driver)
+
 	f, err := ibt.Open(ibtPath)
 	if err != nil {
 		analyzeDie("opening file: %v", err)
@@ -443,6 +447,7 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath, notesDir
 			if setupBlock := analysis.ExtractCarSetupBlock(f.SessionInfo()); setupBlock != "" {
 				pb.SetSetup(pbf, meta.CarScreenName, meta.TrackDisplayName, setupBlock)
 			}
+			pb.SetSource(pbf, meta.CarScreenName, meta.TrackDisplayName, filepath.Base(ibtPath))
 			if err := pb.Save(pbPath, pbf); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not save pb.json: %v\n", err)
 			}
@@ -455,6 +460,10 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath, notesDir
 				stored.LapTimeFormatted, stored.Date,
 				fallback(stored.Weather, "weather unknown"), delta)
 		}
+	}
+	// This session's PB has now been checked, so the catch-up can skip it.
+	if bestLap != nil {
+		markPBScanned(pbPath, ibtPath)
 	}
 
 	aprintln("Laps:")

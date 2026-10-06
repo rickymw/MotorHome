@@ -75,6 +75,7 @@ gui [-port N]          →  RunGUI in gui.go
 Runtime file paths are all derived from the config file's directory:
 - `trackmap.json` — segment geometry store
 - `pb.json` — personal best store
+- `pbscan.json` — sessions already checked for PBs by the catch-up (`pb_catchup.go`)
 - `notes/` — voice notes directory
 
 `analyze.go` was ~1150 lines and its package sat at ~10% coverage; the rendering and helper code is now split out so it can be tested directly. `formatMapLine` is the first result of that — the map-summary line used to be inline in `RunAnalyze` and therefore untestable.
@@ -94,12 +95,13 @@ Two mechanisms make that possible:
 
 `RunAnalyze(args, cfg, trackmapPath, pbPath, notesDir)` flow:
 1. Resolve `.ibt` path (explicit, numeric index, or most-recent from `ibtDir`)
+1a. **PB catch-up** (`pb_catchup.go`): check every session in `ibtDir` not yet in `pbscan.json` for a lap faster than the stored PB, store any it finds (with phases and setup), and fill in phases for PBs stored without them once their track has a map. The session being analysed is skipped — the steps below record its PB, and must, since the vs-PB table captures the previous PB's phases before replacing them. Best-lap selection is `bestAnalyzeLap`, so the catch-up cannot store a lap this pipeline would reject. First run over a full folder takes ~20s (82 sessions, 2.1 GB); after that it is a directory listing
 2. Open file, extract laps and session metadata
 3. Find best flying lap; filter flying laps to within 1.5s of best time (drops slow early-practice laps)
 4. Load trackmap and pb.json; `adoptLegacyNames` moves this session's entries off U+FFFD-mangled keys written before session YAML was decoded from Windows-1252, and saves if it did (before the stored-map lookup, or a migrated map would still be re-detected once). Detect from filtered laps if no entry exists (latlon, fallback to lataccel)
 5. Compute match score; compute/blend brake entries on new sessions
 6. Update geometry counters; save trackmap
-7. Load pb.json; update PB if new; save
+7. Load pb.json; update PB if new (recording `SourceFile`); save; mark the session in `pbscan.json`
 8. Compute the cross-lap comparable set, consistency rows, and located voice notes
 9. Print header, lap list, sector table, per-lap tables, consistency and notes — or emit the JSON document
 

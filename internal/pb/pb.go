@@ -22,6 +22,7 @@ type PersonalBest struct {
 	BrakeEntries     BrakeEntryMap `json:"brakeEntries,omitempty"` // segment name → brake onset
 	Phases           []PBPhase     `json:"phases,omitempty"`       // phase data from PB lap
 	Setup            string        `json:"setup,omitempty"`        // raw "CarSetup:" YAML block from the PB session
+	SourceFile       string        `json:"sourceFile,omitempty"`   // basename of the .ibt the PB lap came from
 }
 
 // File is the top-level structure stored in pb.json: a map from Key → PersonalBest.
@@ -155,6 +156,17 @@ func SetPhases(pbf File, car, track string, phases []PBPhase) {
 		return
 	}
 	pbf[key].Phases = phases
+}
+
+// SetSource records which .ibt file (basename) the PB lap came from, so phase
+// data missing from the record can be computed later, once the track has a
+// map. No-op if no entry exists.
+func SetSource(pbf File, car, track, file string) {
+	key := Key(car, track)
+	if pbf[key] == nil {
+		return
+	}
+	pbf[key].SourceFile = file
 }
 
 // SetSetup stores the raw "CarSetup:" YAML block from the PB lap's session,
