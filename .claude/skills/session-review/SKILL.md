@@ -260,8 +260,30 @@ Use this format:
 > the same shape)*
 >
 > **Focus for the next run:** one sentence — the single thing to think about.
+>
+> **Also found:** *(optional)* one line naming anything else worth a look —
+> "a lap that isn't recorded as your PB yet; the right-rear camber doesn't
+> match the left" — offered, not explained. The driver picks one to follow up.
+
+**Keep it easy to follow.** A debrief the driver loses track of is worse than
+a shorter one they finish:
+
+- **Answer first.** Every section, and every follow-up reply, opens with the
+  conclusion or the action — the evidence comes after, if at all.
+- **One topic at a time.** Anything beyond the items above goes in the
+  *Also found* line, not into the body. In follow-up replies, answer the one
+  question asked and list other findings as a menu.
+- **At most one table**, and only when a comparison genuinely needs it
+  (before/after a setup change, say). Most debriefs need none.
+- **No housekeeping in the coaching.** Files backed up or restored, commands
+  run, what the tool did — leave it out, or put it in a one-line note after
+  everything else.
 
 **Language rules:**
+
+- **No file names, flags or session timestamps** — "your session on the
+  evening of 3 October", not `2026-10-03 22-03-39.ibt`; "your stored best
+  laps", not `pb.json`.
 
 - **No column names or sample counts.** Not `PkBrk`, `LatG`, `lockupSamples`
   or "116 samples". Convert to plain units: seconds, km/h, metres.
