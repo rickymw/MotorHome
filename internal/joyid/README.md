@@ -47,7 +47,13 @@ tools (iRacing, MAIRA) save bindings against it. Deleting the cache to "reset"
 joystick IDs makes Windows invent new GUIDs and every binding goes missing —
 learned the hard way: after a reset, MAIRA reported the wheelbase as
 `Device missing [80046140-…]`, which was the wheelbase's old GUID. Restoring the
-old GUIDs from a registry export brought everything back.
+old GUIDs from a registry export brought the device back — but not its force
+feedback. The same reset deletes
+`JoystickOEMVID_xxxx&PID_xxxxOEMForceFeedback`, the per-user registration of
+the wheelbase's force-feedback driver (Simagic's `{148CC31A-…}`), and Windows
+does not recreate it: MAIRA then failed with `DIERR_DEVICENOTREG` / "Class not
+registered" while DirectInput enumerated and opened the device without
+complaint. That key was restored from the export too.
 
 This package only ever writes `Joystick Id`. There is deliberately no reset.
 

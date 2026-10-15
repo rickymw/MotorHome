@@ -596,7 +596,9 @@ a virtual keyboard, mouse or controller.
 
 **Do not clear Windows' joystick cache to fix ordering.** Each device's entry
 also holds the GUID that games and tools like MAIRA save bindings against;
-deleting it makes Windows invent new ones and every binding goes missing.
+deleting it makes Windows invent new ones and every binding goes missing. It
+also removes the wheelbase's force-feedback driver registration, which Windows
+does not put back.
 Pinning changes only the ID and leaves the GUID alone.
 
 See [internal/joyid/README.md](internal/joyid/README.md).
