@@ -131,8 +131,9 @@ func joyReport(devs []joyid.Device, store joyid.Store) (joyid.Report, error) {
 	}
 	r := joyid.BuildReport(devs, assigned, visible)
 	// A failed count only loses the explanation, not the table.
-	if n, err := store.HIDInterfaces(); err == nil {
-		r.HIDInterfaces = n
+	if list, err := store.HIDInterfaces(); err == nil {
+		r.HIDInterfaces = len(list)
+		r.HIDUsers = joyid.GroupHID(list)
 	}
 	return r, nil
 }

@@ -14,6 +14,6 @@ type otherStore struct{}
 // compiles and its pure halves test on any OS.
 func NewStore() Store { return otherStore{} }
 
-func (otherStore) Assigned() (map[HWID]int, error) { return nil, ErrUnsupported }
-func (otherStore) Visible() (map[HWID]int, error)  { return nil, ErrUnsupported }
-func (otherStore) HIDInterfaces() (int, error)     { return 0, ErrUnsupported }
+func (otherStore) Assigned() (map[HWID]int, error)        { return nil, ErrUnsupported }
+func (otherStore) Visible() (map[HWID]int, error)         { return nil, ErrUnsupported }
+func (otherStore) HIDInterfaces() ([]HIDInterface, error) { return nil, ErrUnsupported }

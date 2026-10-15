@@ -141,3 +141,57 @@ func TestFormatReportIsQuietWhenAllVisible(t *testing.T) {
 		t.Errorf("warned with every device visible and plenty of room:\n%s", buf.String())
 	}
 }
+
+func TestInterfacePathToInstanceID(t *testing.T) {
+	in := `\\?\HID#VID_046D&PID_C52B&MI_01&Col01#a&29ceee04&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}`
+	want := `HID\VID_046D&PID_C52B&MI_01&Col01\a&29ceee04&0&0000`
+	if got := InterfacePathToInstanceID(in); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// Every interface and collection of one USB device must group together, or the
+// breakdown would show a 13-interface dongle as thirteen 1-interface rows.
+func TestDeviceKey(t *testing.T) {
+	cases := map[string]string{
+		`HID\VID_046D&PID_C52B&MI_01&Col01\a&29ceee04&0&0000`:          "VID_046D&PID_C52B",
+		`HID\VID_046D&PID_C52B&MI_02&Col03\a&5f7b042&0&0002`:           "VID_046D&PID_C52B",
+		`HID\VID_0FD9&PID_0098&REV_0360&MI_03&Col01\a&1279fb64&1&0000`: "VID_0FD9&PID_0098",
+		`HID\VID_30B7&PID_1001\c&1b1d2ea3&0&0000`:                      "VID_30B7&PID_1001",
+		`HID\virtualdevice&10&Col02\2&1f4f21a5&0&0001`:                 "VIRTUALDEVICE&10",
+		`HID\virtualdevice&10&Col05\2&1f4f21a5&0&0004`:                 "VIRTUALDEVICE&10",
+	}
+	for in, want := range cases {
+		if got := DeviceKey(in); got != want {
+			t.Errorf("DeviceKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestGroupHID(t *testing.T) {
+	list := []HIDInterface{
+		{Device: "VID_046D&PID_C547", Name: "USB Receiver"},
+		{Device: "VID_28DE&PID_1304", Name: "Steam Controller Puck"},
+		{Device: "VID_28DE&PID_1304"},
+		{Device: "VID_28DE&PID_1304"},
+		{Device: "VID_046D&PID_C547"},
+		{Device: "VID_30B7&PID_1001", Name: "Heusinkveld Sim Pedals Sprint"},
+	}
+	got := GroupHID(list)
+	want := []HIDUser{
+		{Device: "VID_28DE&PID_1304", Name: "Steam Controller Puck", Interfaces: 3},
+		{Device: "VID_046D&PID_C547", Name: "USB Receiver", Interfaces: 2},
+		{Device: "VID_30B7&PID_1001", Name: "Heusinkveld Sim Pedals Sprint", Interfaces: 1},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if GroupHID(nil) != nil {
+		t.Error("empty input should give nil")
+	}
+}

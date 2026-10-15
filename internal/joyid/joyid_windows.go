@@ -284,31 +284,102 @@ var (
 		Data4: [8]byte{0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30}}
 )
 
-// HIDInterfaces counts present HID device interfaces — one per top-level
-// collection, which is why a single wireless dongle can contribute a dozen.
-func (winStore) HIDInterfaces() (int, error) {
+var (
+	procCMLocateDevNodeW      = cfgmgr32.NewProc("CM_Locate_DevNodeW")
+	procCMGetParent           = cfgmgr32.NewProc("CM_Get_Parent")
+	procCMGetDevNodePropertyW = cfgmgr32.NewProc("CM_Get_DevNode_PropertyW")
+	devpkeyBusReportedDesc    = devPropKey{syscall.GUID{Data1: 0x540B947E, Data2: 0x8B40, Data3: 0x45BC, Data4: [8]byte{0xA8, 0xA2, 0x6A, 0x0B, 0x89, 0x4C, 0xBD, 0xA2}}, 4}
+	devpkeyDeviceDesc         = devPropKey{syscall.GUID{Data1: 0xA45C254E, Data2: 0xDF1C, Data3: 0x4EFD, Data4: [8]byte{0x80, 0x20, 0x67, 0xD1, 0x46, 0xA8, 0x50, 0xE0}}, 2}
+)
+
+// devPropKey is DEVPROPKEY.
+type devPropKey struct {
+	fmtid syscall.GUID
+	pid   uint32
+}
+
+// HIDInterfaces lists present HID device interfaces — one per top-level
+// collection, which is why a single wireless dongle can contribute a dozen —
+// each with the device it belongs to and that device's product name.
+func (winStore) HIDInterfaces() ([]HIDInterface, error) {
 	var size uint32
 	if r, _, _ := procCMGetDeviceInterfaceListSize.Call(uintptr(unsafe.Pointer(&size)),
 		uintptr(unsafe.Pointer(&guidDevInterfaceHID)), 0, 0); r != 0 {
-		return 0, fmt.Errorf("CM_Get_Device_Interface_List_Size failed: %d", r)
+		return nil, fmt.Errorf("CM_Get_Device_Interface_List_Size failed: %d", r)
 	}
 	if size == 0 {
-		return 0, nil
+		return nil, nil
 	}
 	buf := make([]uint16, size)
 	if r, _, _ := procCMGetDeviceInterfaceList.Call(uintptr(unsafe.Pointer(&guidDevInterfaceHID)), 0,
 		uintptr(unsafe.Pointer(&buf[0])), uintptr(size), 0); r != 0 {
-		return 0, fmt.Errorf("CM_Get_Device_Interface_List failed: %d", r)
+		return nil, fmt.Errorf("CM_Get_Device_Interface_List failed: %d", r)
 	}
-	// The list is NUL-separated and ends in a double NUL; count the strings.
-	n := 0
+
+	names := map[string]string{} // one name lookup per device, not per interface
+	var out []HIDInterface
+	start := 0
 	for i := 0; i < len(buf); i++ {
-		if buf[i] == 0 {
-			if i == 0 || buf[i-1] == 0 {
-				break
-			}
-			n++
+		if buf[i] != 0 {
+			continue
+		}
+		if i == start {
+			break // the double NUL that ends the list
+		}
+		id := InterfacePathToInstanceID(syscall.UTF16ToString(buf[start:i]))
+		start = i + 1
+		key := DeviceKey(id)
+		name, seen := names[key]
+		if !seen {
+			name = deviceName(id)
+			names[key] = name
+		}
+		out = append(out, HIDInterface{Device: key, Name: name})
+	}
+	return out, nil
+}
+
+// deviceName finds a readable name for the device a HID collection belongs to.
+//
+// The collection itself is "HID-compliant mouse" or similar; the product string
+// the hardware reports ("Razer Clio 2.4") lives on a USB ancestor as the
+// bus-reported description, so walk up a few levels looking for it. Software
+// devices have none, so fall back to the parent's description, which for iCUE is
+// "Corsair composite virtual input device".
+func deviceName(instanceID string) string {
+	id, err := syscall.UTF16PtrFromString(instanceID)
+	if err != nil {
+		return ""
+	}
+	var node uint32
+	if r, _, _ := procCMLocateDevNodeW.Call(uintptr(unsafe.Pointer(&node)), uintptr(unsafe.Pointer(id)), 0); r != 0 {
+		return ""
+	}
+	fallback := ""
+	for level := 0; level < 4; level++ {
+		if s := nodeString(node, &devpkeyBusReportedDesc); s != "" {
+			return s
+		}
+		var parent uint32
+		if r, _, _ := procCMGetParent.Call(uintptr(unsafe.Pointer(&parent)), uintptr(node), 0); r != 0 {
+			break
+		}
+		node = parent
+		if level == 0 {
+			fallback = nodeString(node, &devpkeyDeviceDesc)
 		}
 	}
-	return n, nil
+	return fallback
+}
+
+// nodeString reads a string device property, "" when absent.
+func nodeString(node uint32, key *devPropKey) string {
+	var typ uint32
+	buf := make([]uint16, 256)
+	size := uint32(len(buf) * 2)
+	if r, _, _ := procCMGetDevNodePropertyW.Call(uintptr(node), uintptr(unsafe.Pointer(key)),
+		uintptr(unsafe.Pointer(&typ)), uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)), 0); r != 0 {
+		return ""
+	}
+	return syscall.UTF16ToString(buf)
 }

@@ -455,6 +455,8 @@ function renderJoy(data) {
     ], rows));
   }
 
+  renderHID(data);
+
   // DirectInput lists only about the first hidLimit HID interfaces; that limit,
   // not a bad ID, is what hid the pedals on 2026-10-14. Say so next to the
   // table rather than leaving a red pill unexplained.
@@ -468,6 +470,37 @@ function renderJoy(data) {
   }
   out.textContent = note;
   out.hidden = !note;
+}
+
+/* renderHID draws the HID interface budget: a bar against DirectInput's limit,
+ * then the devices using the most, by name. The breakdown is the point — when
+ * room has to be made, the answer is whatever sits at the top of this list. */
+function renderHID(data) {
+  const box = $("#joy-hid");
+  const n = data.hidInterfaces || 0, limit = data.hidLimit || 64;
+  if (!n) { clear(box); return; }
+
+  const pct = Math.min(100, Math.round((n / limit) * 100));
+  const level = n > limit ? "over" : n >= limit - 4 ? "near" : "ok";
+  const label = n > limit
+    ? `${n - limit} over — controllers late in the list are hidden from games`
+    : `${limit - n} to spare`;
+
+  const users = (data.hidUsers || []).slice(0, 8);
+  // Two Logitech receivers both call themselves "USB Receiver"; a list that
+  // cannot tell them apart cannot say which one to unplug.
+  const seen = {};
+  users.forEach((u) => { seen[u.name] = (seen[u.name] || 0) + 1; });
+  users.forEach((u) => { if (!u.name || seen[u.name] > 1) u.name = `${u.name || "Device"} (${u.device})`; });
+  clear(box,
+    el("h3", { class: "subhead", text: "HID input budget" }),
+    el("div", { class: "meter " + level, role: "meter", "aria-valuemin": "0", "aria-valuemax": String(limit), "aria-valuenow": String(n), "aria-label": "HID interfaces in use" },
+      el("div", { class: "meter-fill", style: `width:${pct}%` })),
+    el("p", { class: "muted small" }, `${n} of about ${limit} HID interfaces used · ${label}`),
+    users.length ? table([
+      { head: "Biggest users", get: (u) => u.name || u.device },
+      { head: "Interfaces", num: true, get: (u) => u.interfaces },
+    ], users) : null);
 }
 
 async function loadJoy() {

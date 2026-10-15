@@ -33,8 +33,15 @@ still occupy positions in the list. The device lost is whichever rig controller
 sits latest in the order, which on this rig is the pedals.
 
 `HIDLimit` (64) is fitted to that one observation, not documented anywhere, so
-the warnings treat it as an estimate. `HIDInterfaces` counts via
-`CM_Get_Device_Interface_List` on `GUID_DEVINTERFACE_HID`.
+the warnings treat it as an estimate.
+
+`HIDInterfaces` lists every interface via `CM_Get_Device_Interface_List` on
+`GUID_DEVINTERFACE_HID`, tagged with the device it belongs to (`DeviceKey`: the
+VID/PID pair, so all of one dongle's collections group together) and that
+device's product name — the bus-reported description from a USB ancestor, since
+the collection itself is only "HID-compliant mouse". `GroupHID` totals them per
+device, largest first; the GUI shows the top of that list so the answer to
+"what do I unplug?" is the first row.
 
 ## Why there is no pinning
 
@@ -100,8 +107,8 @@ user runs, or by a real application's logs.
 
 | File | Contents |
 |---|---|
-| `joyid.go` | Types, `Store` interface, `BuildReport`, `FormatReport` — all pure |
-| `joyid_windows.go` | Registry read, WinMM slot read, DirectInput 8 enumeration, HID interface count |
+| `joyid.go` | Types, `Store` interface, `BuildReport`, `FormatReport`, `GroupHID`, `DeviceKey` — all pure |
+| `joyid_windows.go` | Registry read, WinMM slot read, DirectInput 8 enumeration, HID interface list with device names |
 | `joyid_other.go` | Stub `Store` returning `ErrUnsupported` |
 | `joyid_test.go` | Report and formatting tests against fixed inputs |
 

@@ -93,9 +93,11 @@ rights.
 elevation and the reads would be easy in-process, but the question the card
 answers — would a game launched now see this controller? — can only be answered
 by a process that has just started: a program builds its controller list at
-startup and keeps it. The card shows the HID interface count beside the table
-and explains a hidden device in terms of it, since that limit is what hid the
-pedals on 2026-10-14. There is no write route; pinning was removed.
+startup and keeps it. Below the table it draws the HID input budget — a bar
+against DirectInput's ~64 limit and the eight devices using the most interfaces,
+by name — and explains a hidden device in terms of it, since that limit is what
+hid the pedals on 2026-10-14. Devices that report the same name ("USB Receiver")
+get their hardware ID appended, or the list could not say which to unplug. There is no write route; pinning was removed.
 
 
 ## Starting and stopping one app

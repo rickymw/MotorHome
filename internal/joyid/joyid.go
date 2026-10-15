@@ -100,10 +100,94 @@ type Store interface {
 	// a re-exec of the CLI rather than calling this itself.
 	Visible() (map[HWID]int, error)
 
-	// HIDInterfaces counts the HID device interfaces present on the machine —
-	// every collection of every HID device, not one per physical device.
-	// DirectInput lists only roughly the first HIDLimit of them.
-	HIDInterfaces() (int, error)
+	// HIDInterfaces lists the HID device interfaces present on the machine —
+	// every collection of every HID device, not one per physical device —
+	// each tagged with the device it belongs to. DirectInput lists only
+	// roughly the first HIDLimit of them.
+	HIDInterfaces() ([]HIDInterface, error)
+}
+
+// HIDInterface is one HID interface and the device it belongs to.
+type HIDInterface struct {
+	// Device groups the interfaces of one physical device: `VID_xxxx&PID_xxxx`
+	// for USB hardware, or the enumerator's own name for software devices
+	// (`VIRTUALDEVICE&10` is iCUE's). See DeviceKey.
+	Device string
+	// Name is the product name the device reports, or "" when it reports none.
+	Name string
+}
+
+// HIDUser is one device's share of the HID interface count — what the GUI
+// lists so the biggest consumers are obvious when room has to be made.
+type HIDUser struct {
+	Device     string `json:"device"`
+	Name       string `json:"name,omitempty"`
+	Interfaces int    `json:"interfaces"`
+}
+
+// GroupHID totals interfaces per device, largest first. Ties sort by device so
+// the list does not shuffle between refreshes.
+func GroupHID(list []HIDInterface) []HIDUser {
+	idx := map[string]int{}
+	var out []HIDUser
+	for _, in := range list {
+		i, ok := idx[in.Device]
+		if !ok {
+			i = len(out)
+			idx[in.Device] = i
+			out = append(out, HIDUser{Device: in.Device})
+		}
+		out[i].Interfaces++
+		if out[i].Name == "" {
+			out[i].Name = in.Name
+		}
+	}
+	sort.SliceStable(out, func(a, b int) bool {
+		if out[a].Interfaces != out[b].Interfaces {
+			return out[a].Interfaces > out[b].Interfaces
+		}
+		return out[a].Device < out[b].Device
+	})
+	return out
+}
+
+// InterfacePathToInstanceID turns a device interface path such as
+// `\\?\HID#VID_046D&PID_C52B&MI_01&Col01#a&29ceee04&0&0000#{4d1e55b2-…}` into the
+// device instance ID it belongs to (`HID\VID_046D&PID_C52B&MI_01&Col01\a&29ceee04&0&0000`).
+func InterfacePathToInstanceID(path string) string {
+	p := strings.TrimPrefix(path, `\\?\`)
+	if i := strings.LastIndex(p, "#{"); i >= 0 {
+		p = p[:i]
+	}
+	return strings.ReplaceAll(p, "#", `\`)
+}
+
+// DeviceKey says which physical device an instance ID belongs to: the
+// `VID_xxxx&PID_xxxx` pair when there is one, so every interface and collection
+// of one USB device groups together, and otherwise the device part of the ID
+// with its interface and collection suffixes removed.
+func DeviceKey(instanceID string) string {
+	parts := strings.Split(strings.ToUpper(instanceID), `\`)
+	if len(parts) < 2 {
+		return strings.ToUpper(instanceID)
+	}
+	var vid, pid string
+	var rest []string
+	for _, f := range strings.Split(parts[1], "&") {
+		switch {
+		case strings.HasPrefix(f, "VID_") && len(f) == 8:
+			vid = f
+		case strings.HasPrefix(f, "PID_") && len(f) == 8:
+			pid = f
+		case strings.HasPrefix(f, "MI_"), strings.HasPrefix(f, "COL"), strings.HasPrefix(f, "REV_"):
+		default:
+			rest = append(rest, f)
+		}
+	}
+	if vid != "" && pid != "" {
+		return vid + "&" + pid
+	}
+	return strings.Join(rest, "&")
 }
 
 // Device is a controller the caller has a name for — in practice, one of the
@@ -144,6 +228,9 @@ type Report struct {
 	// listing devices, which is what hid the pedals on 2026-10-14.
 	HIDInterfaces int `json:"hidInterfaces,omitempty"`
 	HIDLimit      int `json:"hidLimit"`
+	// HIDUsers breaks that count down by device, largest first, so making room
+	// is a matter of reading the top of a list.
+	HIDUsers []HIDUser `json:"hidUsers,omitempty"`
 }
 
 // BuildReport assembles the table: every named device, plus any other

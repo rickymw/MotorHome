@@ -423,7 +423,7 @@ Two Win32 notes: `SetupDiGetClassDevs` will **not** accept a device instance ID 
 
 ### joy subcommand flow (`cmd/motorhome/joy.go`)
 
-Read-only check: each rig controller, whether DirectInput 8 lists it (`Games`), the joystick ID Windows holds for it, and the machine's HID interface count. `joy [-json]`; `joy list` is accepted as a synonym. Full detail in [internal/joyid/README.md](internal/joyid/README.md).
+Read-only check: each rig controller, whether DirectInput 8 lists it (`Games`), the joystick ID Windows holds for it, and the machine's HID interface count. `-json` also carries `hidUsers`, the count broken down by device (`joyid.GroupHID`), which the GUI renders as a budget bar plus the biggest users by name. `joy [-json]`; `joy list` is accepted as a synonym. Full detail in [internal/joyid/README.md](internal/joyid/README.md).
 
 **Motivating case (2026-10-14):** the Heusinkveld pedals worked in SmartControl but were invisible to iRacing, MAIRA and `joy.cpl`. **The cause was DirectInput's HID interface limit**: it lists only roughly the first 64 HID *interfaces* (every collection of every HID device counts — one wireless dongle can add a dozen), and silently drops everything later in the order. The rig had 75; the pedals sat at position 73. Unplugging an unused Steam Controller dongle (13 interfaces) fixed it with iCUE and the Xeneon Edge still connected. Every earlier "cause" — iCUE's virtual keyboard/mouse (5 interfaces), the Xeneon Edge (4), replugging the Edge (moves its interfaces behind the pedals) — only moved the count or the order. HidHide does not help: hidden devices still occupy positions. `HIDLimit` (64) is fitted to this one rig, so treat it as an estimate.
 

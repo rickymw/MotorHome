@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,12 +23,12 @@ var (
 type fakeJoyStore struct {
 	assigned map[joyid.HWID]int
 	visible  map[joyid.HWID]int
-	hid      int
+	hid      []joyid.HIDInterface
 }
 
-func (f *fakeJoyStore) Assigned() (map[joyid.HWID]int, error) { return f.assigned, nil }
-func (f *fakeJoyStore) Visible() (map[joyid.HWID]int, error)  { return f.visible, nil }
-func (f *fakeJoyStore) HIDInterfaces() (int, error)           { return f.hid, nil }
+func (f *fakeJoyStore) Assigned() (map[joyid.HWID]int, error)        { return f.assigned, nil }
+func (f *fakeJoyStore) Visible() (map[joyid.HWID]int, error)         { return f.visible, nil }
+func (f *fakeJoyStore) HIDInterfaces() ([]joyid.HIDInterface, error) { return f.hid, nil }
 
 // rigStore is the rig as found on 2026-10-14: everything visible but the pedals.
 func rigStore() *fakeJoyStore {
@@ -68,7 +69,7 @@ func joyConfig(t *testing.T) string {
 
 func TestRunJoyFlagsTheHiddenDevice(t *testing.T) {
 	store := rigStore()
-	store.hid = 75
+	store.hid = hidList(75, 13)
 	out, _ := withJoyFakes(t, store, connectedRig())
 	if code := RunJoy(nil, joyConfig(t)); code != 0 {
 		t.Fatalf("exit = %d", code)
@@ -119,7 +120,7 @@ func TestRunJoyRejectsRemovedSubcommands(t *testing.T) {
 
 func TestRunJoyJSON(t *testing.T) {
 	store := rigStore()
-	store.hid = 62
+	store.hid = hidList(62, 0)
 	out, errBuf := withJoyFakes(t, store, connectedRig())
 	if code := RunJoy([]string{"-json"}, joyConfig(t)); code != 0 {
 		t.Fatalf("exit = %d: %s", code, errBuf)
@@ -138,7 +139,7 @@ func TestRunJoyJSON(t *testing.T) {
 
 func TestJoyPreflightWarnsAndNamesTheLimit(t *testing.T) {
 	store := rigStore()
-	store.hid = 75
+	store.hid = hidList(75, 13)
 	out, errBuf := withJoyFakes(t, store, connectedRig())
 	joyPreflight(config.Config{})
 
@@ -161,10 +162,40 @@ func TestJoyPreflightWarnsAndNamesTheLimit(t *testing.T) {
 func TestJoyPreflightIsSilentWhenAllIsWell(t *testing.T) {
 	store := rigStore()
 	store.visible[hwPedals] = 4
-	store.hid = 62
+	store.hid = hidList(62, 0)
 	out, errBuf := withJoyFakes(t, store, connectedRig())
 	joyPreflight(config.Config{})
 	if out.Len() != 0 || errBuf.Len() != 0 {
 		t.Errorf("stdout=%q stderr=%q", out, errBuf)
+	}
+}
+
+// hidList makes n interfaces, the first `dongle` of them belonging to one
+// 13-interface-style dongle and the rest to distinct devices.
+func hidList(n, dongle int) []joyid.HIDInterface {
+	out := make([]joyid.HIDInterface, 0, n)
+	for i := 0; i < n; i++ {
+		if i < dongle {
+			out = append(out, joyid.HIDInterface{Device: "VID_28DE&PID_1304", Name: "Steam Controller Puck"})
+		} else {
+			out = append(out, joyid.HIDInterface{Device: fmt.Sprintf("VID_%04X&PID_0001", i)})
+		}
+	}
+	return out
+}
+
+func TestRunJoyJSONBreaksDownHIDUse(t *testing.T) {
+	store := rigStore()
+	store.hid = hidList(75, 13)
+	out, _ := withJoyFakes(t, store, connectedRig())
+	if code := RunJoy([]string{"-json"}, joyConfig(t)); code != 0 {
+		t.Fatal("exit != 0")
+	}
+	var r joyid.Report
+	if err := json.Unmarshal(out.Bytes(), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.HIDInterfaces != 75 || len(r.HIDUsers) == 0 || r.HIDUsers[0].Interfaces != 13 || r.HIDUsers[0].Name != "Steam Controller Puck" {
+		t.Errorf("breakdown = %+v", r.HIDUsers)
 	}
 }
