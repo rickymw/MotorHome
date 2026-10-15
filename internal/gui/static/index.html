@@ -61,6 +61,23 @@
     </div>
 
     <div class="card">
+      <div class="card-head">
+        <h2>Joystick IDs</h2>
+        <span class="summary" id="joy-summary"></span>
+      </div>
+      <p class="muted small">
+        The slot number each controller has in games. Pick an ID to pin a
+        device there; <code>motorhome start</code> puts pinned devices back if
+        Windows reshuffles them. Restart a running game to see a change.
+      </p>
+      <div id="joy-list"><p class="muted">Loading…</p></div>
+      <div class="actions">
+        <button class="btn" id="btn-joy-refresh">Refresh</button>
+      </div>
+      <pre class="output" id="joy-output" hidden></pre>
+    </div>
+
+    <div class="card">
       <div class="card-head"><h2>Camera</h2></div>
       <p class="muted small">
         Restarts the Windows Frame Server to release a webcam a closed app never

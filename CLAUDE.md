@@ -1,7 +1,7 @@
 # CLAUDE.md — MotorHome
 
 ## Project overview
-Windows CLI tool (`motorhome.exe`) that launches, monitors, and closes sim racing apps in sequence, analyses iRacing `.ibt` telemetry files, and records voice notes during a session. Designed for Stream Deck integration. Twelve subcommands: `start`, `stop`, `status`, `analyze`, `coach`, `pb`, `notes`, `live`, `camera`, `usb`, `shaker`, `gui`. Accepts an optional `-config <path>` flag.
+Windows CLI tool (`motorhome.exe`) that launches, monitors, and closes sim racing apps in sequence, analyses iRacing `.ibt` telemetry files, and records voice notes during a session. Designed for Stream Deck integration. Thirteen subcommands: `start`, `stop`, `status`, `analyze`, `coach`, `pb`, `notes`, `live`, `camera`, `usb`, `joy`, `shaker`, `gui`. Accepts an optional `-config <path>` flag.
 
 ## Documentation rule
 When making any code change, always review and update documentation to match:
@@ -77,7 +77,7 @@ go test -tags e2e -v ./internal/launcher/ -run TestE2E_FullStack -timeout 120s
 
 ## Usage
 ```powershell
-motorhome start                                     # launch all apps in config order
+motorhome start                                     # re-apply joystick pins, then launch all apps in config order
 motorhome stop                                      # kill all apps
 motorhome status                                    # print running/stopped state
 motorhome analyze                                   # analyze most recently modified .ibt in ibtDir
@@ -117,6 +117,10 @@ motorhome usb on pedals                             # re-enable it
 motorhome usb toggle handbrake                      # flip whichever way it currently is
 motorhome usb off all                               # disable every connected sim device
 motorhome usb scan                                  # every USB device on the machine, for adding to the list
+motorhome joy                                       # joystick ID per controller, and whether games can see it
+motorhome joy pin pedals 0                          # hold the pedals at joystick ID 0 (swaps the occupant)
+motorhome joy unpin pedals                          # stop holding it; the ID stays where it is
+motorhome joy apply                                 # put every pinned device back now
 motorhome shaker                                    # list audio outputs, name the one a test would use
 motorhome shaker test                               # gentle 2%-50% ramp at 40Hz, Ctrl-C aborts
 motorhome shaker test -max 0.2                      # stop the ramp at 20% of full scale
@@ -167,6 +171,7 @@ Each package has its own README with full detail. Below is a terse summary with 
 | `internal/audio` | WinMM `Recorder.Start/Stop`; `BuildWAV` for Whisper input | [README](internal/audio/README.md) |
 | `internal/camera` | `Restarter` interface; Windows impl stops/starts `FrameServer`+`FrameServerMonitor` via raw SCM syscalls to un-stick a frozen webcam | [README](internal/camera/README.md) |
 | `internal/usbdev` | `Controller` interface; identifies sim-racing USB devices by VID/PID and enables/disables them via raw SetupAPI syscalls | [README](internal/usbdev/README.md) |
+| `internal/joyid` | `Store` interface; reads/writes DirectInput joystick IDs (HKCU registry), `Plan`s pin swaps, checks what DirectInput 8 lists via raw COM | [README](internal/joyid/README.md) |
 | `internal/shaker` | `Player` interface; plays enveloped low-frequency tones at a tactile transducer via raw WinMM `waveOut*` syscalls | [README](internal/shaker/README.md) |
 | `internal/gui` | Stdlib-only local web interface; `Deps` injection keeps it cross-platform, `guardLocal` keeps it loopback-only | [README](internal/gui/README.md) |
 
@@ -180,6 +185,7 @@ Key top-level fields:
 - `whisperPath` / `whisperModel` — paths to `whisper-cli.exe` and model file.
 - `apps[].processName` — exe stem for `tasklist`/`taskkill`; falls back to `name`. Must match Task Manager's image name.
 - `usbDevices` — the sim hardware `usb` recognises: `{alias, name, vid, pid}` with the IDs as hex *strings* (`"0x30B7"`). Omitted/empty means the built-in `usbdev.KnownDevices` list. **A non-empty list replaces the built-ins rather than extending them** — see below.
+- `joyPins` — `{"<usb alias>": <joystick id 0-15>}`, written by `joy pin` and the GUI, re-applied by `start`. Distinct IDs enforced; a pin for an alias that no longer exists is skipped with a note, not a load failure.
 - `apps[].args` — `string`, not `[]string`; split with `strings.Fields` before passing to `exec.Command`.
 
 ### analyze subcommand flow (`cmd/motorhome/analyze.go`)
@@ -418,6 +424,29 @@ different device than the one named.
 
 Two Win32 notes: `SetupDiGetClassDevs` will **not** accept a device instance ID as its `Enumerator` despite the documentation saying it does (fails `ERROR_INVALID_DATA` — verified on this rig), so `openDevice` uses `SetupDiCreateDeviceInfoList` + `SetupDiOpenDeviceInfoW`; and enable clears `DICS_FLAG_CONFIGSPECIFIC` *then* `DICS_FLAG_GLOBAL` while disable sets only `DICS_FLAG_GLOBAL`, because a device can be disabled in either scope and clearing one leaves it disabled while reporting success.
 
+### joy subcommand flow (`cmd/motorhome/joy.go`)
+
+Shows each rig controller's joystick ID and whether a game started now would see it, and pins devices to fixed IDs. Full detail in [internal/joyid/README.md](internal/joyid/README.md).
+
+| Command | Behaviour |
+|---|---|
+| `joy` / `joy list [-json]` | Table: ID, Pin, Games, Alias, Device |
+| `joy pin <alias> <id>` | Save to `joyPins`, apply; an occupied ID swaps with its holder |
+| `joy unpin <alias\|all>` | Drop pins; IDs stay put |
+| `joy apply` | Re-apply every pin |
+
+**Motivating case (2026-10-14):** the Heusinkveld pedals worked in SmartControl but were invisible to iRacing and `joy.cpl`. The cause turned out to be Corsair iCUE's virtual input device breaking DirectInput enumeration — nothing an ID change fixes — after a long detour through the joystick cache. The `Games` column and the `start` pre-flight exist so that failure is one command to see next time; pinning replaced JoyIDs.
+
+**The ID is `Joystick Id` under `HKCU\...\PrivateProperties\DirectInput\VID_xxxx&PID_xxxx\Calibration\<n>`.** Changing it is the whole mechanism (verified: a fresh process saw the new order, it survived a replug, and Windows rewrote its own slot table to match). The same key holds the device's instance **GUID**, which games and MAIRA save bindings against — **never clear that cache**. Doing so on this rig made Windows invent new GUIDs; MAIRA reported `Device missing` until the old GUIDs were restored from a registry export. `joyid` only ever writes `Joystick Id`, and there is deliberately no reset command.
+
+**Visibility is asked of DirectInput 8, not the legacy WinMM API.** They disagreed during that GUID restore — WinMM listed all five devices, DirectInput 8 three — and DirectInput 8 is what iRacing and MAIRA use. The answer is only valid in a freshly started process (a program keeps the controller list it built at startup), which is why the GUI re-execs `joy -json` instead of reading in-process.
+
+**`-json` is stripped by hand** before flag parsing so it works after the operands; Go's parser would otherwise stop at the alias.
+
+**`joyPreflight` runs before `launcher.RunStart`**: re-applies pins and warns about any connected rig device DirectInput does not list. Silent when there is nothing to say; never blocks the start.
+
+Dispatched before `config.Load` like `usb`. Listing works from a bare exe with the built-in device list; pinning needs a config to save into. No elevation — it is all HKCU.
+
 ### shaker subcommand flow (`cmd/motorhome/shaker.go`)
 
 Plays a low-frequency tone at a tactile transducer (ButtKicker) through its audio output device, to test it without launching a sim. Full detail in [internal/shaker/README.md](internal/shaker/README.md).
@@ -517,7 +546,7 @@ Stores written before the fix hold the mangled key, which cannot be decoded (U+F
 ### gui subcommand flow (`cmd/motorhome/gui.go`)
 
 Serves the web interface on `127.0.0.1` and opens a browser. Five panels: rig
-control (apps + USB + camera + transducer), settings, session analysis, live
+control (apps + USB + joystick IDs + camera + transducer), settings, session analysis, live
 telemetry, personal bests. Full detail in [internal/gui/README.md](internal/gui/README.md).
 
 **The transducer panel runs in-process, unlike the USB one.** `usb on|off` goes
@@ -688,6 +717,9 @@ All live next to the binary in `G:\RACING\SimAppLauncher\`:
 - `usb` toggles the whole top-level USB device, so disabling the MOZA handbrake also takes down its `COM6` serial interface (used by MOZA Pit House). Toggling a single interface is possible but would leave the physical device half-on in a way the output could not sensibly describe
 - A game that enumerated its controllers at startup may need restarting to notice a device appearing or disappearing; `usb` says so after any change it makes
 - `usb` depends on UAC elevation being silent on this machine. On a box that prompts, every state change would raise a consent dialog — workable from a terminal, bad from a Stream Deck button mid-session. The fallback would be a one-time elevated scheduled task triggered by the unelevated binary, the same shape as the `camera` service ACL
+- `joy` pins by VID/PID, so two identical devices share one DirectInput cache entry and cannot be pinned separately
+- A joystick ID change only reaches programs started afterwards; a running game keeps the order it saw at launch. Windows can still reshuffle IDs mid-session (a replug) — `joy apply` puts pins back on demand, `start` does it automatically
+- `joy`'s `Games` column says a device is missing from DirectInput, not why
 - `shaker` can only verify the path from PC to the audio interface — that Windows accepted the format, opened the device and played the buffers. It cannot detect whether the transducer moved, and nothing in software can tell you an amplifier is electrically sound. The summary says so rather than reporting a clean run as "working". **Confirmed the hard way on 2026-09-11**: after the ButtKicker smelled of burning and went silent, the `KT USB Audio` device still enumerated as entirely healthy (every interface `OK`) and `shaker test` still reported clean runs. The USB audio interface and the power amplifier are separate sections and only the first is visible to software — never infer amplifier health from this command
 - `shaker` picks its device by name substring, and WinMM truncates device names to 32 characters (`MAXPNAMELEN`), so a device whose distinguishing part falls past that cutoff cannot be matched. Reading full names means WASAPI COM interop, which is a lot of vtable plumbing for a cosmetic gain
 - `shaker` has no sweep mode. A 20–80 Hz sweep is the better tool for finding rattles and resonances, but it drives the amplifier continuously, which is the opposite of what the stepped ramp is for

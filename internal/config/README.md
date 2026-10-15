@@ -17,6 +17,7 @@ type Config struct {
     WhisperModel string  // path to whisper .bin model file
     Apps         []App
     USBDevices   []USBDevice // empty = usbdev's built-in list
+    JoyPins      map[string]int // usb alias → pinned joystick ID (0–15)
 }
 
 type USBDevice struct {
@@ -48,6 +49,11 @@ type App struct {
 - An alias that is `"all"` (the wildcard target), starts with a dash (a command
   line would read it as a flag), or carries padding whitespace (it would never
   match what the user typed)
+- A joystick pin outside 0–15, with an empty alias, or two devices pinned to
+  the same ID (applying them would swap the pair back and forth on every
+  `start`). A pin naming an alias that no longer exists is *not* rejected —
+  failing the whole config over a renamed device would take every subcommand
+  down; it is skipped with a note when pins are applied
 
 ### Why the USB IDs are strings
 

@@ -4,7 +4,7 @@ Main entry point and subcommand dispatch for the `motorhome` CLI.
 
 ## What it does
 
-Parses the `-config` flag, loads the config file, and dispatches to one of eleven subcommands: `start`, `stop`, `status`, `analyze`, `coach`, `pb`, `notes`, `live`, `camera`, `usb`, `gui`.
+Parses the `-config` flag, loads the config file, and dispatches to one of thirteen subcommands: `start`, `stop`, `status`, `analyze`, `coach`, `pb`, `notes`, `live`, `camera`, `usb`, `joy`, `shaker`, `gui`.
 
 ## Files
 
@@ -50,6 +50,8 @@ Parses the `-config` flag, loads the config file, and dispatches to one of eleve
 | `usb.go` | `RunUSB` — list, scan, and enable/disable the sim-racing USB devices |
 | `elevate_windows.go` | `winIsElevated` / `winRelaunchElevated` — token check and `ShellExecuteExW runas` re-exec used by `usb` |
 | `usb_test.go` | Tests for usb listing, toggling, absent devices and the elevation hand-off |
+| `joy.go` | `RunJoy` — joystick ID table, `pin`/`unpin`/`apply`; `joyPreflight`, run ahead of `start` |
+| `joy_test.go` | Tests for the ID table, pin swaps (registry and config), refusals, stale pins, `-json` placement, and the `start` pre-flight |
 | `gui.go` | `RunGUI` — serve the web interface; `subcommandRunner` re-exec helper, `openBrowser` |
 | `gui_windows.go` | `attachPlatformDeps` — wires the shared-memory, SetupAPI and service-control providers into `gui.Deps`; `snapshotFromLive` builds `LiveSnapshot` (position, lap timing, fuel with a stateful `FuelTracker`, conditions) |
 | `gui_windows_test.go` | Tests for `snapshotFromLive`: delta validity, fuel tracking across frames, unit conversion, absent weather variables |
@@ -69,6 +71,7 @@ notes [set-hotkey]     →  RunNotes in notes.go
 live [-watch] [-hz N]  →  RunLive in live.go
 camera                 →  RunCamera in camera.go
 usb [on|off|toggle]    →  RunUSB in usb.go
+joy [pin|unpin|apply]  →  RunJoy in joy.go
 gui [-port N]          →  RunGUI in gui.go
 ```
 
@@ -290,6 +293,40 @@ claiming a change that didn't happen; an unplugged one prints `not connected`
 and is skipped instead of failing the command, so `usb off all` still works with
 the wheelbase off the rig. A target that is *entirely* unplugged is an error,
 checked before elevating.
+
+## joy subcommand (`joy.go`)
+
+```
+motorhome joy [list] [-json]           # ID table
+motorhome joy pin <alias> <id 0-15>    # pin, saving to joyPins, and apply
+motorhome joy unpin <alias|all>        # drop pins; IDs stay where they are
+motorhome joy apply                    # re-apply every pin
+```
+
+The registry and DirectInput work is in
+[internal/joyid](../../internal/joyid/README.md). This file owns the config
+side and the wording.
+
+Dispatched ahead of `config.Load`, like `usb`: listing falls back to the
+built-in device list and works from a bare exe. Pinning needs a real config,
+because a pin that did not outlive the process would not be a pin.
+
+**Pins are stored by alias** (`"joyPins": {"pedals": 0}`). Pinning onto an ID
+another device is pinned to moves that device's pin to the ID being vacated —
+the same swap the registry write makes — so the config stays valid (pins must
+be distinct) and matches what Windows now holds. A pin whose alias no longer
+names a device is skipped with a note on every apply, and `unpin` matches the
+pin table rather than the device list so it can still be cleared.
+
+**`-json` is accepted anywhere.** Go's flag parsing stops at the first operand,
+so `joy pin pedals 0 -json` would otherwise leave `-json` as a third argument —
+which is exactly what the GUI hit first time round. It is stripped out by hand
+before parsing.
+
+**`joyPreflight` runs before `start`**: it re-applies pins (Windows reshuffles
+IDs when devices come and go) and warns on stderr about any connected rig
+device DirectInput does not list. It prints nothing when there is nothing to
+say and never blocks the start.
 
 ## gui subcommand (`gui.go`)
 

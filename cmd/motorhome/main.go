@@ -21,7 +21,7 @@ func defaultConfigPath() string {
 func main() {
 	cfgPath := flag.String("config", defaultConfigPath(), "path to config file")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: motorhome [-config <path>] <start|stop|status|analyze|coach|pb|notes|live|camera|usb|shaker|gui>")
+		fmt.Fprintln(os.Stderr, "Usage: motorhome [-config <path>] <start|stop|status|analyze|coach|pb|notes|live|camera|usb|joy|shaker|gui>")
 		fmt.Fprintln(os.Stderr, "       motorhome analyze [-lap N] [-update-map] [-json] [-dump T3 [-dump-all]] [file.ibt]")
 		fmt.Fprintln(os.Stderr, "       motorhome coach [-lap N] [-table] [file.ibt]")
 		fmt.Fprintln(os.Stderr, "       motorhome pb [list|show|diff|prune]")
@@ -31,6 +31,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "       motorhome gui [-port N] [-no-open]")
 		fmt.Fprintln(os.Stderr, "       motorhome usb [list|scan] [-v]")
 		fmt.Fprintf(os.Stderr, "       motorhome usb <on|off|toggle> <%s>   (`usb list` names your devices)\n", usbTargetHint())
+		fmt.Fprintln(os.Stderr, "       motorhome joy [list|apply] [-json]")
+		fmt.Fprintln(os.Stderr, "       motorhome joy pin <alias> <id 0-15>  |  joy unpin <alias|all>")
 		fmt.Fprintln(os.Stderr, "       motorhome shaker [devices]")
 		fmt.Fprintln(os.Stderr, "       motorhome shaker <test|tone> [-device S] [-freq Hz] [-secs N]")
 		flag.PrintDefaults()
@@ -55,6 +57,10 @@ func main() {
 		return
 	case "usb":
 		os.Exit(RunUSB(args[1:], *cfgPath))
+	case "joy":
+		// Same reasoning as usb: listing works from a bare exe with the
+		// built-in device list, and it loads the config itself to save pins.
+		os.Exit(RunJoy(args[1:], *cfgPath))
 	case "shaker":
 		// Reads nothing from the config either, and is the subcommand most
 		// likely to be run while diagnosing hardware that has just been moved
@@ -109,6 +115,7 @@ func main() {
 		pm := launcher.NewProcessManager()
 		switch args[0] {
 		case "start":
+			joyPreflight(cfg)
 			launcher.RunStart(cfg, pm)
 		case "stop":
 			launcher.RunStop(cfg, pm)

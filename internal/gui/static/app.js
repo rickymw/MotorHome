@@ -421,6 +421,80 @@ async function loadUSB() {
   }
 }
 
+/* ── rig: joystick IDs ─────────────────────────────────────────────── */
+
+/* The table comes from a re-exec of `joy -json` on every load, because only a
+ * freshly started process sees controllers the way a game launched now would.
+ * Picking an ID pins the device there; the server swaps whoever held it. */
+function renderJoy(data) {
+  const rows = data.devices || [];
+  const hidden = rows.filter((d) => d.hidden).length;
+  $("#joy-summary").textContent = hidden ? `${hidden} hidden from games` : "";
+  $("#joy-summary").className = "summary" + (hidden ? " bad" : "");
+
+  if (!rows.length) {
+    clear($("#joy-list"), el("p", { class: "muted", text: "No controllers found." }));
+  } else {
+    const maxId = data.maxId ?? 15;
+    clear($("#joy-list"), table([
+      { head: "ID", num: true, get: (d) => (d.id === null || d.id === undefined ? "—" : d.id) },
+      { head: "Device", get: (d) => d.alias ? d.name : `${d.name} (${d.hardwareId})` },
+      {
+        head: "Games",
+        get: (d) => d.hidden
+          ? el("span", { class: "pill err", text: "can't see it" })
+          : d.visible
+            ? el("span", { class: "pill on", text: "visible" })
+            : el("span", { class: "pill off", text: d.connected ? "—" : "unplugged" }),
+      },
+      {
+        head: "Pin",
+        get: (d) => {
+          // Only named rig devices can be pinned: a pin is stored by alias.
+          if (!d.alias) return el("span", { class: "muted small", text: "not in device list" });
+          const pinned = d.pinned !== null && d.pinned !== undefined;
+          const sel = el("select", {
+            "aria-label": `Pin ${d.alias} to joystick ID`,
+            onchange: (ev) => setJoy(ev.target, d.alias, ev.target.value === "" ? null : Number(ev.target.value)),
+          },
+          el("option", { value: "", text: pinned ? "unpin" : "not pinned", selected: !pinned }),
+          Array.from({ length: maxId + 1 }, (_, i) =>
+            el("option", { value: String(i), text: `pin to ${i}`, selected: pinned && d.pinned === i })));
+          return sel;
+        },
+      },
+    ], rows));
+  }
+
+  const out = $("#joy-output");
+  const notes = data.notes || [];
+  out.textContent = notes.join("\n");
+  out.hidden = notes.length === 0;
+}
+
+async function setJoy(control, alias, id) {
+  control.disabled = true;
+  try {
+    renderJoy(await api("/api/joy", { method: "POST", body: JSON.stringify({ alias, id }) }));
+    toast(id === null ? `${alias}: unpinned` : `${alias}: pinned to ${id}`, "ok");
+  } catch (e) {
+    toast(e.message, "error");
+    loadJoy(); // put the dropdown back to what is actually stored
+  } finally {
+    control.disabled = false;
+  }
+}
+
+async function loadJoy() {
+  try {
+    renderJoy(await api("/api/joy"));
+  } catch (e) {
+    clear($("#joy-list"), el("p", { class: "muted", text: e.message }));
+  }
+}
+
+$("#btn-joy-refresh").addEventListener("click", (ev) => withBusy(ev.target, loadJoy));
+
 /* ── rig: camera ───────────────────────────────────────────────────── */
 
 $("#btn-camera").addEventListener("click", (ev) => withBusy(ev.target, async () => {
@@ -1200,3 +1274,5 @@ $("#btn-shaker-stop").addEventListener("click", async () => {
 function formatPct(level) {
   return `${parseFloat((level * 100).toFixed(2))}%`;
 }
+
+loadJoy();
