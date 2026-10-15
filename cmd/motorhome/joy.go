@@ -395,7 +395,12 @@ func joyReport(cfg config.Config, devs []joyid.Device, store joyid.Store) (joyid
 	if err != nil {
 		return joyid.Report{}, err
 	}
-	return joyid.BuildReport(devs, assigned, visible, cfg.JoyPins), nil
+	r := joyid.BuildReport(devs, assigned, visible, cfg.JoyPins)
+	// A failed count only loses the explanation, not the table.
+	if n, err := store.HIDInterfaces(); err == nil {
+		r.HIDInterfaces = n
+	}
+	return r, nil
 }
 
 // joyPreflight runs ahead of `motorhome start`: it re-applies the pins and
@@ -427,9 +432,14 @@ func joyPreflight(cfg config.Config) {
 		joyErrf("warning: could not check which controllers games can see: %v", err)
 		return
 	}
+	hidden := 0
 	for _, d := range devs {
 		if _, ok := visible[d.HW]; d.Connected && !ok {
 			joyErrf("warning: %s is connected but games cannot see it — run `motorhome joy` for details", d.Alias)
+			hidden++
 		}
+	}
+	if n, err := store.HIDInterfaces(); err == nil && hidden > 0 && n >= joyid.HIDLimit-4 {
+		joyErrf("warning: this PC has %d HID interfaces and DirectInput lists only about the first %d — unplug an input gadget you do not use", n, joyid.HIDLimit)
 	}
 }

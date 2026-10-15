@@ -128,6 +128,7 @@ type fakeStore struct {
 	visible  map[HWID]int
 	sets     []Change
 	notified int
+	hid      int
 	setErr   error
 }
 
@@ -140,7 +141,8 @@ func (f *fakeStore) SetID(hw HWID, id int) error {
 	f.sets = append(f.sets, Change{HW: hw, From: f.assigned[hw], To: id})
 	return nil
 }
-func (f *fakeStore) Notify() { f.notified++ }
+func (f *fakeStore) Notify()                     { f.notified++ }
+func (f *fakeStore) HIDInterfaces() (int, error) { return f.hid, nil }
 
 // Apply runs before every session, so a pin that already holds must cost no
 // writes and no notification.
@@ -236,7 +238,7 @@ func TestFormatReportExplainsHiddenDevices(t *testing.T) {
 	var buf bytes.Buffer
 	FormatReport(&buf, r)
 	out := buf.String()
-	for _, want := range []string{"NO", "invisible to games", "virtual input device", "(not connected)", "Pinned pedals to ID 0."} {
+	for _, want := range []string{"NO", "invisible to games", "will not fix", "(not connected)", "Pinned pedals to ID 0."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -259,5 +261,42 @@ func TestDescribeChange(t *testing.T) {
 	}
 	if got := DescribeChange(Change{rim, None, 2}, names); got != "VID_3670&PID_0808: ID none → 2" {
 		t.Errorf("got %q", got)
+	}
+}
+
+// A hidden device is explained by the HID count, because on this rig that —
+// not the ID — was what DirectInput was dropping devices over.
+func TestFormatReportNamesTheHIDLimitForHiddenDevices(t *testing.T) {
+	r := BuildReport(rigDevices(), map[HWID]int{pedals: 4, handbrake: 0}, map[HWID]int{handbrake: 0}, nil)
+	r.HIDInterfaces = 75
+	var buf bytes.Buffer
+	FormatReport(&buf, r)
+	for _, want := range []string{"75 HID interfaces", "about the first 64", "wireless dongles"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, buf.String())
+		}
+	}
+}
+
+// Everything visible but one gadget from the edge: worth a line before it bites.
+func TestFormatReportWarnsNearTheHIDLimit(t *testing.T) {
+	all := map[HWID]int{pedals: 4, handbrake: 0}
+	for _, c := range []struct {
+		n    int
+		warn bool
+	}{{62, true}, {59, false}, {0, false}} {
+		r := BuildReport(rigDevices()[:2], all, all, nil)
+		r.HIDInterfaces = c.n
+		var buf bytes.Buffer
+		FormatReport(&buf, r)
+		if got := strings.Contains(buf.String(), "Close to the limit"); got != c.warn {
+			t.Errorf("%d interfaces: warned=%v, want %v\n%s", c.n, got, c.warn, buf.String())
+		}
+	}
+}
+
+func TestBuildReportCarriesTheLimit(t *testing.T) {
+	if r := BuildReport(nil, nil, nil, nil); r.HIDLimit != HIDLimit {
+		t.Errorf("HIDLimit = %d", r.HIDLimit)
 	}
 }

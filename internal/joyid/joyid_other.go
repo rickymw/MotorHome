@@ -18,3 +18,4 @@ func (otherStore) Assigned() (map[HWID]int, error) { return nil, ErrUnsupported 
 func (otherStore) Visible() (map[HWID]int, error)  { return nil, ErrUnsupported }
 func (otherStore) SetID(HWID, int) error           { return ErrUnsupported }
 func (otherStore) Notify()                         {}
+func (otherStore) HIDInterfaces() (int, error)     { return 0, ErrUnsupported }

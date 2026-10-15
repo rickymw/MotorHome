@@ -590,9 +590,12 @@ a connected controller is invisible to games. A game that is already running
 keeps the old order until it is restarted. No admin rights are needed.
 
 **A `NO` in the Games column is not something an ID change fixes.** It means
-DirectInput does not list the device at all. On this rig that was Corsair
-iCUE's virtual input device breaking enumeration — look for software that adds
-a virtual keyboard, mouse or controller.
+DirectInput does not list the device at all. The usual cause is having too many
+HID input interfaces: DirectInput only lists about the first 64, and every
+keyboard, mouse, receiver, touchscreen and dongle adds several. When something is
+hidden the table prints the count. Unplug or disable an input gadget you don't
+use — on this rig an idle Steam Controller dongle accounted for 13, and removing
+it brought the pedals back with Corsair iCUE and the Xeneon Edge still running.
 
 **Do not clear Windows' joystick cache to fix ordering.** Each device's entry
 also holds the GUID that games and tools like MAIRA save bindings against;

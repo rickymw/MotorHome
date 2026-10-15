@@ -38,6 +38,20 @@ import (
 // slots, so a pin outside 0–15 could never be honoured.
 const MaxID = 15
 
+// HIDLimit is roughly how many HID interfaces DirectInput will list. Past it,
+// devices later in the system's HID interface order are silently left out —
+// EnumDevices still succeeds, they are simply not in the result.
+//
+// Measured, not documented: on 2026-10-14 this rig had 75 HID interfaces;
+// DirectInput listed the wheelbase at position 59 and dropped the pedals at 73,
+// and taking the count to 62 (unplugging a 13-interface Steam Controller
+// dongle) brought the pedals back. 64 is the value that fits, so it is an
+// estimate to warn against, not a boundary to compute with.
+const HIDLimit = 64
+
+// hidMargin is how close to HIDLimit the count may get before the table warns.
+const hidMargin = 4
+
 // None marks a device Windows knows about but has not given a joystick ID —
 // either it is not a game controller, or it has not been enumerated as one
 // since its cache entry was created.
@@ -103,6 +117,11 @@ type Store interface {
 
 	// SetID writes one device's ID.
 	SetID(hw HWID, id int) error
+
+	// HIDInterfaces counts the HID device interfaces present on the machine —
+	// every collection of every HID device, not one per physical device.
+	// DirectInput lists only roughly the first HIDLimit of them; see HIDLimit.
+	HIDInterfaces() (int, error)
 
 	// Notify tells Windows the joystick configuration changed.
 	Notify()
@@ -275,9 +294,15 @@ type Row struct {
 
 // Report is the whole table plus anything the command did to produce it.
 type Report struct {
-	Devices []Row    `json:"devices"`
-	MaxID   int      `json:"maxId"`
-	Notes   []string `json:"notes,omitempty"`
+	Devices []Row `json:"devices"`
+	MaxID   int   `json:"maxId"`
+	// HIDInterfaces is how many HID interfaces the machine has, 0 when it
+	// could not be counted. Reported because past HIDLimit DirectInput stops
+	// listing devices, and that — not anything an ID change touches — is what
+	// hid the pedals on 2026-10-14.
+	HIDInterfaces int      `json:"hidInterfaces,omitempty"`
+	HIDLimit      int      `json:"hidLimit"`
+	Notes         []string `json:"notes,omitempty"`
 }
 
 // BuildReport assembles the table: every named device, plus any other
@@ -285,7 +310,7 @@ type Report struct {
 // IDs too — a pin onto an ID held by something unnamed has to show what it is
 // displacing.
 func BuildReport(devs []Device, assigned, visible map[HWID]int, pins map[string]int) Report {
-	r := Report{MaxID: MaxID}
+	r := Report{MaxID: MaxID, HIDLimit: HIDLimit}
 	named := map[HWID]bool{}
 
 	for _, d := range devs {
@@ -373,10 +398,17 @@ func FormatReport(w io.Writer, r Report) {
 	fmt.Fprintln(w)
 	if hidden > 0 {
 		// The table alone would show the NO and leave the reader to guess at
-		// it. On this rig the cause was a virtual input device another program
-		// installed, not anything an ID change fixes, so say where to look.
-		fmt.Fprintf(w, "  %d connected controller(s) are invisible to games. A changed ID will not fix\n", hidden)
-		fmt.Fprintln(w, "  that: look for software that installs a virtual input device (Corsair iCUE did).")
+		// it. On this rig the cause was the machine's HID interface count
+		// passing DirectInput's limit, which no ID change fixes, so say so.
+		fmt.Fprintf(w, "  %d connected controller(s) are invisible to games. A changed ID will not fix that.\n", hidden)
+		if r.HIDInterfaces > 0 {
+			fmt.Fprintf(w, "  This PC has %d HID interfaces; DirectInput lists only about the first %d.\n", r.HIDInterfaces, r.HIDLimit)
+			fmt.Fprintln(w, "  Unplug or disable an input gadget you do not use (wireless dongles add the most).")
+		}
+	} else if r.HIDInterfaces >= r.HIDLimit-hidMargin {
+		// Everything is visible, but one more gadget could push the last
+		// device in the list off the end. Worth saying before it happens.
+		fmt.Fprintf(w, "  Close to the limit: %d HID interfaces, and DirectInput lists only about the first %d.\n", r.HIDInterfaces, r.HIDLimit)
 	}
 	fmt.Fprintln(w, "  Pin a device with `motorhome joy pin <alias> <id>`; `motorhome start` re-applies pins.")
 	for _, n := range r.Notes {

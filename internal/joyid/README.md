@@ -11,8 +11,9 @@ Games number controllers 0–15. Windows assigns those numbers and reshuffles th
 when devices come and go, which moves bindings onto the wrong device. Worse, a
 connected device can drop out of the list games see altogether while working
 fine in its vendor's software — the Heusinkveld pedals did exactly that on
-2026-10-14, and nothing on the machine said so. That case is why `Visible` and
-the `Hidden` flag exist; pinning is the part JoyIDs used to be needed for.
+2026-10-14, and nothing on the machine said so. That case is why `Visible`, the
+`Hidden` flag and the HID interface count exist; pinning is the part JoyIDs used
+to be needed for.
 
 ## Where the ID lives
 
@@ -25,12 +26,17 @@ HKCU\System\CurrentControlSet\Control\MediaProperties\PrivateProperties\
         "GUID"         REG_BINARY  the device's instance GUID
 ```
 
-Writing `Joystick Id` is the whole mechanism. Verified on this rig before any
-code was written: swapping two devices' values changed the order a freshly
-started process saw; the change survived the device being unplugged and
-replugged; and Windows rewrote its own slot table
-(`MediaResources\Joystick\DINPUT.DLL\CurrentJoystickSettings`) to match without
-being touched — so that table is left alone.
+Writing `Joystick Id` is the whole mechanism. Verified on the real rig:
+`joy pin pedals 1` swapped the pedals and the haptic unit, and the haptic unit
+then answered at ID 4 in a freshly started DirectInput enumeration. Windows keeps
+its own slot table (`MediaResources\Joystick\DINPUT.DLL\CurrentJoystickSettings`)
+and that table is left alone.
+
+An earlier round of "verification" does not count, and is recorded so nobody
+relies on it: it ran from an agent shell whose registry writes landed in a
+private sandbox overlay (`\REGISTRY\WC\Silo…`), so its own probes saw changes no
+real program could. The claim that a pin survives the device being replugged
+came from that round and has not been re-checked.
 
 A device can have several `Calibration\<n>` keys, one per HID collection
 DirectInput has seen, and only the game-controller collection has an ID (the
@@ -46,14 +52,16 @@ The same key holds `GUID`, the instance GUID DirectInput reports. Games and
 tools (iRacing, MAIRA) save bindings against it. Deleting the cache to "reset"
 joystick IDs makes Windows invent new GUIDs and every binding goes missing —
 learned the hard way: after a reset, MAIRA reported the wheelbase as
-`Device missing [80046140-…]`, which was the wheelbase's old GUID. Restoring the
-old GUIDs from a registry export brought the device back — but not its force
-feedback. The same reset deletes
-`JoystickOEMVID_xxxx&PID_xxxxOEMForceFeedback`, the per-user registration of
-the wheelbase's force-feedback driver (Simagic's `{148CC31A-…}`), and Windows
-does not recreate it: MAIRA then failed with `DIERR_DEVICENOTREG` / "Class not
-registered" while DirectInput enumerated and opened the device without
-complaint. That key was restored from the export too.
+`Device missing [80046140-…]`, which was the wheelbase's old GUID. The same reset
+also deletes `Joystick\OEM\VID_xxxx&PID_xxxx\OEMForceFeedback`, the per-user
+registration of the wheelbase's force-feedback driver (Simagic's `{148CC31A-…}`),
+and Windows does not recreate it — opening the device for force feedback then
+fails with `DIERR_DEVICENOTREG` / "Class not registered". Importing the old GUIDs
+and that key from a registry export (run by the user, in their own terminal)
+brought MAIRA back with force feedback.
+
+The reset was a mistake made while chasing the pedals, whose real cause was the
+HID interface limit below. It fixed nothing and cost an evening.
 
 This package only ever writes `Joystick Id`. There is deliberately no reset.
 
@@ -76,14 +84,15 @@ to run before every session in `motorhome start`.
 `Visible` asks **DirectInput 8** — the API iRacing and MAIRA use — which game
 controllers are attached, and pairs each with its legacy (WinMM) slot.
 
-It started out asking only the legacy API, and that was wrong in a way that
-mattered: during the GUID restore above, the legacy API reported all five rig
-devices in their slots while DirectInput 8 listed three. A check built on the
-legacy API said everything was fine while MAIRA could not find the wheelbase.
+It started out asking only the legacy API. DirectInput 8 is the one that has to
+be right, since it is what the sims use; MAIRA's own logs, which list every device
+its DirectInput 8 enumeration returns, are a good independent check of it. (The
+two APIs were also seen to disagree, but only from the sandboxed shell described
+above, so that observation is not evidence.)
 
 The answer is only meaningful in a **freshly started process**. A program builds
 its controller list when it starts and keeps it, so a long-running process can
-go on seeing a device every newer process has lost (observed). That is why the
+go on seeing a device newer processes have lost. That is why the
 GUI re-execs `motorhome joy -json` instead of calling this in-process.
 
 The DirectInput call is raw COM through the vtable — `DirectInput8Create`, then
@@ -91,12 +100,37 @@ The DirectInput call is raw COM through the vtable — `DirectInput8Create`, the
 reused, because callback slots are a fixed, never-freed resource. For HID
 devices the first field of `guidProduct` packs `PID<<16 | VID`.
 
+## The HID interface limit — what actually hid the pedals
+
+DirectInput lists only roughly the first 64 HID *interfaces* on the machine.
+Interfaces, not devices: every top-level collection of every HID device counts,
+so one wireless dongle can contribute a dozen. Past the limit, devices later in
+the system's HID interface order are simply missing — `EnumDevices` returns
+`S_OK` and the list is short. Nothing logs it.
+
+On 2026-10-14 the rig had **75** interfaces. DirectInput listed the wheelbase at
+position 59 and dropped the pedals at 73. Unplugging an unused Steam Controller
+dongle (13 interfaces) took the count to 62 and the pedals came back, with
+Corsair iCUE and the Xeneon Edge both still connected.
+
+That explains a day of misleading clues. iCUE's virtual keyboard/mouse adds 5
+interfaces and the Xeneon Edge 4, so uninstalling iCUE or unplugging the Edge
+"fixed" it; replugging the Edge moved its interfaces to the end of the order,
+behind the pedals, which also "fixed" it. HidHide did not help — hidden devices
+still occupy positions in the list. The device lost is whichever rig controller
+sits latest in the order, which on this rig is the pedals.
+
+`HIDInterfaces` counts them via `CM_Get_Device_Interface_List` on
+`GUID_DEVINTERFACE_HID`. The table prints the count when a device is hidden, and
+warns when it is within `hidMargin` of the limit even with nothing hidden yet —
+one more gadget is all it takes.
+
 ## Files
 
 | File | Contents |
 |---|---|
 | `joyid.go` | Types, `Store` interface, `Plan`, `Apply`, `BuildReport`, `FormatReport` — all pure |
-| `joyid_windows.go` | Registry reads/writes, WinMM slot read, DirectInput 8 enumeration |
+| `joyid_windows.go` | Registry reads/writes, WinMM slot read, DirectInput 8 enumeration, HID interface count |
 | `joyid_other.go` | Stub `Store` returning `ErrUnsupported` |
 | `joyid_test.go` | Planning, apply, report and formatting tests against a fake store |
 
@@ -108,6 +142,7 @@ devices the first field of `guidProduct` packs `PID<<16 | VID`.
   game keeps the order it saw at launch.
 - Windows can still reshuffle IDs between `start`s (a device replugged
   mid-session). `motorhome joy apply` puts pins back on demand.
-- `Hidden` says a device is missing from DirectInput, not why. The one cause seen
-  so far was a third-party virtual input device (Corsair iCUE), which no ID change
-  fixes.
+- `HIDLimit` (64) is an estimate fitted to one rig, not a documented constant,
+  so the "close to the limit" warning is a hint rather than a boundary.
+- `Hidden` says a device is missing from DirectInput; the HID count says whether
+  the limit is the likely reason. Any other cause would need other tools.

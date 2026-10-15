@@ -466,8 +466,21 @@ function renderJoy(data) {
     ], rows));
   }
 
+  // DirectInput lists only about the first hidLimit HID interfaces, and the
+  // pedals vanishing on 2026-10-14 was that limit, not a bad ID. Say so next to
+  // the table rather than leaving a red pill unexplained.
+  const n = data.hidInterfaces || 0, limit = data.hidLimit || 64;
+  if (n) {
+    $("#joy-summary").textContent += (hidden ? " · " : "") + `${n} HID interfaces (limit ~${limit})`;
+    if (n >= limit - 4) $("#joy-summary").className = "summary bad";
+  }
+
   const out = $("#joy-output");
-  const notes = data.notes || [];
+  const notes = (data.notes || []).slice();
+  if (hidden && n) {
+    notes.unshift(`This PC has ${n} HID interfaces and DirectInput lists only about the first ${limit}. ` +
+      "Unplug or disable an input gadget you do not use (wireless dongles add the most); changing IDs will not help.");
+  }
   out.textContent = notes.join("\n");
   out.hidden = notes.length === 0;
 }

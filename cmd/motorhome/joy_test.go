@@ -23,6 +23,7 @@ type fakeJoyStore struct {
 	assigned map[joyid.HWID]int
 	visible  map[joyid.HWID]int
 	sets     int
+	hid      int
 }
 
 func (f *fakeJoyStore) Assigned() (map[joyid.HWID]int, error) {
@@ -38,7 +39,8 @@ func (f *fakeJoyStore) SetID(hw joyid.HWID, id int) error {
 	f.sets++
 	return nil
 }
-func (f *fakeJoyStore) Notify() {}
+func (f *fakeJoyStore) Notify()                     {}
+func (f *fakeJoyStore) HIDInterfaces() (int, error) { return f.hid, nil }
 
 // rigStore is the rig as found on 2026-10-14: everything visible but the pedals.
 func rigStore() *fakeJoyStore {
@@ -288,5 +290,28 @@ func TestJoyPreflightIsSilentWhenAllIsWell(t *testing.T) {
 	joyPreflight(config.Config{})
 	if out.Len() != 0 || errBuf.Len() != 0 {
 		t.Errorf("stdout=%q stderr=%q", out, errBuf)
+	}
+}
+
+func TestRunJoyReportsHIDCount(t *testing.T) {
+	store := rigStore()
+	store.hid = 75
+	out, _ := withJoyFakes(t, store, connectedRig())
+	if code := RunJoy([]string{"-json"}, joyConfig(t, nil)); code != 0 {
+		t.Fatal("exit != 0")
+	}
+	var r joyid.Report
+	if err := json.Unmarshal(out.Bytes(), &r); err != nil || r.HIDInterfaces != 75 || r.HIDLimit != joyid.HIDLimit {
+		t.Errorf("report = %+v, err %v", r, err)
+	}
+}
+
+func TestJoyPreflightNamesTheHIDLimit(t *testing.T) {
+	store := rigStore()
+	store.hid = 75
+	_, errBuf := withJoyFakes(t, store, connectedRig())
+	joyPreflight(config.Config{})
+	if !strings.Contains(errBuf.String(), "75 HID interfaces") {
+		t.Errorf("stderr = %q", errBuf)
 	}
 }

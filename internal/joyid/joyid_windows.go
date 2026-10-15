@@ -300,3 +300,42 @@ func di8GameControllers() ([]HWID, error) {
 	}
 	return append([]HWID(nil), di8Found...), nil
 }
+
+var (
+	cfgmgr32                         = syscall.NewLazyDLL("cfgmgr32.dll")
+	procCMGetDeviceInterfaceListSize = cfgmgr32.NewProc("CM_Get_Device_Interface_List_SizeW")
+	procCMGetDeviceInterfaceList     = cfgmgr32.NewProc("CM_Get_Device_Interface_ListW")
+
+	// guidDevInterfaceHID is GUID_DEVINTERFACE_HID.
+	guidDevInterfaceHID = syscall.GUID{Data1: 0x4D1E55B2, Data2: 0xF16F, Data3: 0x11CF,
+		Data4: [8]byte{0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30}}
+)
+
+// HIDInterfaces counts present HID device interfaces — one per top-level
+// collection, which is why a single wireless dongle can contribute a dozen.
+func (winStore) HIDInterfaces() (int, error) {
+	var size uint32
+	if r, _, _ := procCMGetDeviceInterfaceListSize.Call(uintptr(unsafe.Pointer(&size)),
+		uintptr(unsafe.Pointer(&guidDevInterfaceHID)), 0, 0); r != 0 {
+		return 0, fmt.Errorf("CM_Get_Device_Interface_List_Size failed: %d", r)
+	}
+	if size == 0 {
+		return 0, nil
+	}
+	buf := make([]uint16, size)
+	if r, _, _ := procCMGetDeviceInterfaceList.Call(uintptr(unsafe.Pointer(&guidDevInterfaceHID)), 0,
+		uintptr(unsafe.Pointer(&buf[0])), uintptr(size), 0); r != 0 {
+		return 0, fmt.Errorf("CM_Get_Device_Interface_List failed: %d", r)
+	}
+	// The list is NUL-separated and ends in a double NUL; count the strings.
+	n := 0
+	for i := 0; i < len(buf); i++ {
+		if buf[i] == 0 {
+			if i == 0 || buf[i-1] == 0 {
+				break
+			}
+			n++
+		}
+	}
+	return n, nil
+}
