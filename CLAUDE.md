@@ -56,9 +56,10 @@ that way so `gofmt -l .` stays empty and formatting noise never mixes into a
 behavioural diff.
 
 Note that `go vet ./...` does **not** pass cleanly and cannot be used as a gate:
-three `unsafe.Pointer` conversions in `cmd/motorhome/notes.go` and
-`internal/iracing/live_windows.go` are deliberate and correct (OS-owned memory
-from Win32 callbacks and `MapViewOfFile`). Their `//nolint:govet` comments are
+four `unsafe.Pointer` conversions in `cmd/motorhome/notes.go`,
+`internal/iracing/live_windows.go` and `internal/joyid/joyid_windows.go` are
+deliberate and correct (OS-owned memory
+from Win32 and DirectInput callbacks and `MapViewOfFile`). Their `//nolint:govet` comments are
 golangci-lint syntax and do not suppress `go vet`.
 
 ## Build
@@ -77,7 +78,7 @@ go test -tags e2e -v ./internal/launcher/ -run TestE2E_FullStack -timeout 120s
 
 ## Usage
 ```powershell
-motorhome start                                     # re-apply joystick pins, then launch all apps in config order
+motorhome start                                     # warn if a controller is hidden from games, then launch all apps in config order
 motorhome stop                                      # kill all apps
 motorhome status                                    # print running/stopped state
 motorhome analyze                                   # analyze most recently modified .ibt in ibtDir
@@ -117,10 +118,7 @@ motorhome usb on pedals                             # re-enable it
 motorhome usb toggle handbrake                      # flip whichever way it currently is
 motorhome usb off all                               # disable every connected sim device
 motorhome usb scan                                  # every USB device on the machine, for adding to the list
-motorhome joy                                       # joystick ID per controller, and whether games can see it
-motorhome joy pin pedals 0                          # hold the pedals at joystick ID 0 (swaps the occupant)
-motorhome joy unpin pedals                          # stop holding it; the ID stays where it is
-motorhome joy apply                                 # put every pinned device back now
+motorhome joy                                       # which controllers games can see, and the HID interface count
 motorhome shaker                                    # list audio outputs, name the one a test would use
 motorhome shaker test                               # gentle 2%-50% ramp at 40Hz, Ctrl-C aborts
 motorhome shaker test -max 0.2                      # stop the ramp at 20% of full scale
@@ -171,7 +169,7 @@ Each package has its own README with full detail. Below is a terse summary with 
 | `internal/audio` | WinMM `Recorder.Start/Stop`; `BuildWAV` for Whisper input | [README](internal/audio/README.md) |
 | `internal/camera` | `Restarter` interface; Windows impl stops/starts `FrameServer`+`FrameServerMonitor` via raw SCM syscalls to un-stick a frozen webcam | [README](internal/camera/README.md) |
 | `internal/usbdev` | `Controller` interface; identifies sim-racing USB devices by VID/PID and enables/disables them via raw SetupAPI syscalls | [README](internal/usbdev/README.md) |
-| `internal/joyid` | `Store` interface; reads/writes DirectInput joystick IDs (HKCU registry), `Plan`s pin swaps, checks what DirectInput 8 lists via raw COM | [README](internal/joyid/README.md) |
+| `internal/joyid` | `Store` interface; read-only — which controllers DirectInput 8 lists (raw COM), their joystick IDs, and the HID interface count | [README](internal/joyid/README.md) |
 | `internal/shaker` | `Player` interface; plays enveloped low-frequency tones at a tactile transducer via raw WinMM `waveOut*` syscalls | [README](internal/shaker/README.md) |
 | `internal/gui` | Stdlib-only local web interface; `Deps` injection keeps it cross-platform, `guardLocal` keeps it loopback-only | [README](internal/gui/README.md) |
 
@@ -185,7 +183,6 @@ Key top-level fields:
 - `whisperPath` / `whisperModel` — paths to `whisper-cli.exe` and model file.
 - `apps[].processName` — exe stem for `tasklist`/`taskkill`; falls back to `name`. Must match Task Manager's image name.
 - `usbDevices` — the sim hardware `usb` recognises: `{alias, name, vid, pid}` with the IDs as hex *strings* (`"0x30B7"`). Omitted/empty means the built-in `usbdev.KnownDevices` list. **A non-empty list replaces the built-ins rather than extending them** — see below.
-- `joyPins` — `{"<usb alias>": <joystick id 0-15>}`, written by `joy pin` and the GUI, re-applied by `start`. Distinct IDs enforced; a pin for an alias that no longer exists is skipped with a note, not a load failure.
 - `apps[].args` — `string`, not `[]string`; split with `strings.Fields` before passing to `exec.Command`.
 
 ### analyze subcommand flow (`cmd/motorhome/analyze.go`)
@@ -426,26 +423,21 @@ Two Win32 notes: `SetupDiGetClassDevs` will **not** accept a device instance ID 
 
 ### joy subcommand flow (`cmd/motorhome/joy.go`)
 
-Shows each rig controller's joystick ID and whether a game started now would see it, and pins devices to fixed IDs. Full detail in [internal/joyid/README.md](internal/joyid/README.md).
+Read-only check: each rig controller, whether DirectInput 8 lists it (`Games`), the joystick ID Windows holds for it, and the machine's HID interface count. `joy [-json]`; `joy list` is accepted as a synonym. Full detail in [internal/joyid/README.md](internal/joyid/README.md).
 
-| Command | Behaviour |
-|---|---|
-| `joy` / `joy list [-json]` | Table: ID, Pin, Games, Alias, Device |
-| `joy pin <alias> <id>` | Save to `joyPins`, apply; an occupied ID swaps with its holder |
-| `joy unpin <alias\|all>` | Drop pins; IDs stay put |
-| `joy apply` | Re-apply every pin |
+**Motivating case (2026-10-14):** the Heusinkveld pedals worked in SmartControl but were invisible to iRacing, MAIRA and `joy.cpl`. **The cause was DirectInput's HID interface limit**: it lists only roughly the first 64 HID *interfaces* (every collection of every HID device counts — one wireless dongle can add a dozen), and silently drops everything later in the order. The rig had 75; the pedals sat at position 73. Unplugging an unused Steam Controller dongle (13 interfaces) fixed it with iCUE and the Xeneon Edge still connected. Every earlier "cause" — iCUE's virtual keyboard/mouse (5 interfaces), the Xeneon Edge (4), replugging the Edge (moves its interfaces behind the pedals) — only moved the count or the order. HidHide does not help: hidden devices still occupy positions. `HIDLimit` (64) is fitted to this one rig, so treat it as an estimate.
 
-**Motivating case (2026-10-14):** the Heusinkveld pedals worked in SmartControl but were invisible to iRacing, MAIRA and `joy.cpl`. **The cause was DirectInput's HID interface limit**: it lists only roughly the first 64 HID *interfaces* (every collection of every HID device counts — one wireless dongle can add a dozen), and silently drops everything later in the order. The rig had 75; the pedals sat at position 73. Unplugging an unused Steam Controller dongle (13 interfaces) fixed it with iCUE and the Xeneon Edge still connected. Every earlier "cause" — iCUE's virtual keyboard/mouse (5 interfaces), the Xeneon Edge (4), replugging the Edge (moves its interfaces behind the pedals) — only moved the count or the order. HidHide does not help: hidden devices still occupy positions. `HIDLimit` (64) is fitted to this one rig, so treat it as an estimate. The `Games` column, the HID count in the table, and the `start` pre-flight exist so this is one command to see next time; pinning replaced JoyIDs.
+**There is no pinning.** `joy pin/unpin/apply` and the `joyPins` config field existed briefly (writing `Joystick Id` in the DirectInput cache, as JoyIDs does) and were removed: iRacing and MAIRA bind by device GUID, not slot number, so slot order never mattered to them, and the "device changed, rebind" symptoms were devices dropping off the list because of the HID limit. An old `joyPins` entry in a config file is ignored on load and dropped on the next save.
 
-**The ID is `Joystick Id` under `HKCU\...\PrivateProperties\DirectInput\VID_xxxx&PID_xxxx\Calibration\<n>`.** Changing it is the whole mechanism — verified on the real rig when `joy pin pedals 1` swapped pedals and haptic and the haptic answered at ID 4. (Earlier claims that a pin survives a replug came from an agent shell whose registry writes went to a sandbox overlay, `\REGISTRY\WC\Silo…`, and are unverified.) The same key holds the device's instance **GUID**, which games and MAIRA save bindings against — **never clear that cache**. Doing so on this rig made Windows invent new GUIDs (MAIRA: `Device missing`) and also deleted `Joystick\OEM\VID_xxxx&PID_xxxx\OEMForceFeedback`, the per-user pointer to the wheelbase's force-feedback driver (Simagic's `{148CC31A-…}` in `simpro_*.dll`), which Windows does **not** recreate — force feedback then fails with `DIERR_DEVICENOTREG` / "Class not registered". Both were restored by the user importing a `.reg` built from an export. `joyid` only ever writes `Joystick Id`, and there is deliberately no reset command.
+**Never clear the DirectInput cache** (`HKCU\...\PrivateProperties\DirectInput` and `Joystick\OEM`). Each entry's `GUID` is what games and MAIRA bind against; deleting it on this rig made Windows invent new GUIDs (MAIRA: `Device missing`) and also deleted `Joystick\OEM\VID_xxxx&PID_xxxx\OEMForceFeedback`, the per-user pointer to the wheelbase's force-feedback driver (Simagic's `{148CC31A-…}` in `simpro_*.dll`), which Windows does **not** recreate — force feedback then fails with `DIERR_DEVICENOTREG` / "Class not registered". Both were restored by the user importing a `.reg` built from an export.
 
 **Visibility is asked of DirectInput 8, not the legacy WinMM API**, because DirectInput 8 is what iRacing and MAIRA use; MAIRA's logs (`Documents\MAIRA\Logs`) list every device its enumeration returns and make a good independent check. The answer is only valid in a freshly started process (a program keeps the controller list it built at startup), which is why the GUI re-execs `joy -json` instead of reading in-process.
 
-**`-json` is stripped by hand** before flag parsing so it works after the operands; Go's parser would otherwise stop at the alias.
+**Registry state cannot be verified from an agent shell.** The shell used to build this ran in a sandbox whose HKCU writes and reads went to a private overlay (`\REGISTRY\WC\Silo…`, visible in Process Monitor); device enumeration and files were real. It produced an hour of false "verified" results. Confirm anything registry-dependent with a command the user runs, or a real application's logs.
 
-**`joyPreflight` runs before `launcher.RunStart`**: re-applies pins and warns about any connected rig device DirectInput does not list. Silent when there is nothing to say; never blocks the start.
+**`joyPreflight` runs before `launcher.RunStart`**: warns about any connected rig controller DirectInput does not list, naming the HID count. It deliberately says nothing when all are visible, even near the limit — a line every session would soon be ignored. Never blocks the start.
 
-Dispatched before `config.Load` like `usb`. Listing works from a bare exe with the built-in device list; pinning needs a config to save into. No elevation — it is all HKCU.
+Dispatched before `config.Load` like `usb`; works from a bare exe with the built-in device list. No elevation.
 
 ### shaker subcommand flow (`cmd/motorhome/shaker.go`)
 
@@ -546,7 +538,7 @@ Stores written before the fix hold the mangled key, which cannot be decoded (U+F
 ### gui subcommand flow (`cmd/motorhome/gui.go`)
 
 Serves the web interface on `127.0.0.1` and opens a browser. Five panels: rig
-control (apps + USB + joystick IDs + camera + transducer), settings, session analysis, live
+control (apps + USB + game controllers + camera + transducer), settings, session analysis, live
 telemetry, personal bests. Full detail in [internal/gui/README.md](internal/gui/README.md).
 
 **The transducer panel runs in-process, unlike the USB one.** `usb on|off` goes
@@ -717,8 +709,6 @@ All live next to the binary in `G:\RACING\SimAppLauncher\`:
 - `usb` toggles the whole top-level USB device, so disabling the MOZA handbrake also takes down its `COM6` serial interface (used by MOZA Pit House). Toggling a single interface is possible but would leave the physical device half-on in a way the output could not sensibly describe
 - A game that enumerated its controllers at startup may need restarting to notice a device appearing or disappearing; `usb` says so after any change it makes
 - `usb` depends on UAC elevation being silent on this machine. On a box that prompts, every state change would raise a consent dialog — workable from a terminal, bad from a Stream Deck button mid-session. The fallback would be a one-time elevated scheduled task triggered by the unelevated binary, the same shape as the `camera` service ACL
-- `joy` pins by VID/PID, so two identical devices share one DirectInput cache entry and cannot be pinned separately
-- A joystick ID change only reaches programs started afterwards; a running game keeps the order it saw at launch. Windows can still reshuffle IDs mid-session (a replug) — `joy apply` puts pins back on demand, `start` does it automatically
 - `joy`'s `Games` column says a device is missing from DirectInput; the HID interface count it prints says whether DirectInput's limit is the likely reason. `HIDLimit` (64) is fitted to this rig, not documented, so the "close to the limit" warning is a hint
 - `shaker` can only verify the path from PC to the audio interface — that Windows accepted the format, opened the device and played the buffers. It cannot detect whether the transducer moved, and nothing in software can tell you an amplifier is electrically sound. The summary says so rather than reporting a clean run as "working". **Confirmed the hard way on 2026-09-11**: after the ButtKicker smelled of burning and went silent, the `KT USB Audio` device still enumerated as entirely healthy (every interface `OK`) and `shaker test` still reported clean runs. The USB audio interface and the power amplifier are separate sections and only the first is visible to software — never infer amplifier health from this command
 - `shaker` picks its device by name substring, and WinMM truncates device names to 32 characters (`MAXPNAMELEN`), so a device whose distinguishing part falls past that cutoff cannot be matched. Reading full names means WASAPI COM interop, which is a lot of vtable plumbing for a cosmetic gain

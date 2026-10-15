@@ -421,23 +421,27 @@ async function loadUSB() {
   }
 }
 
-/* ── rig: joystick IDs ─────────────────────────────────────────────── */
+/* ── rig: game controllers ─────────────────────────────────────────── */
 
 /* The table comes from a re-exec of `joy -json` on every load, because only a
  * freshly started process sees controllers the way a game launched now would.
- * Picking an ID pins the device there; the server swaps whoever held it. */
+ * It is read-only: games bind by device GUID, not slot, so there is nothing
+ * here worth changing. */
 function renderJoy(data) {
   const rows = data.devices || [];
   const hidden = rows.filter((d) => d.hidden).length;
-  $("#joy-summary").textContent = hidden ? `${hidden} hidden from games` : "";
-  $("#joy-summary").className = "summary" + (hidden ? " bad" : "");
+  const n = data.hidInterfaces || 0, limit = data.hidLimit || 64;
+
+  const parts = [];
+  if (hidden) parts.push(`${hidden} hidden from games`);
+  if (n) parts.push(`${n} HID interfaces (limit ~${limit})`);
+  $("#joy-summary").textContent = parts.join(" · ");
+  $("#joy-summary").className = "summary" + (hidden || (n && n >= limit - 4) ? " bad" : "");
 
   if (!rows.length) {
     clear($("#joy-list"), el("p", { class: "muted", text: "No controllers found." }));
   } else {
-    const maxId = data.maxId ?? 15;
     clear($("#joy-list"), table([
-      { head: "ID", num: true, get: (d) => (d.id === null || d.id === undefined ? "—" : d.id) },
       { head: "Device", get: (d) => d.alias ? d.name : `${d.name} (${d.hardwareId})` },
       {
         head: "Games",
@@ -447,55 +451,23 @@ function renderJoy(data) {
             ? el("span", { class: "pill on", text: "visible" })
             : el("span", { class: "pill off", text: d.connected ? "—" : "unplugged" }),
       },
-      {
-        head: "Pin",
-        get: (d) => {
-          // Only named rig devices can be pinned: a pin is stored by alias.
-          if (!d.alias) return el("span", { class: "muted small", text: "not in device list" });
-          const pinned = d.pinned !== null && d.pinned !== undefined;
-          const sel = el("select", {
-            "aria-label": `Pin ${d.alias} to joystick ID`,
-            onchange: (ev) => setJoy(ev.target, d.alias, ev.target.value === "" ? null : Number(ev.target.value)),
-          },
-          el("option", { value: "", text: pinned ? "unpin" : "not pinned", selected: !pinned }),
-          Array.from({ length: maxId + 1 }, (_, i) =>
-            el("option", { value: String(i), text: `pin to ${i}`, selected: pinned && d.pinned === i })));
-          return sel;
-        },
-      },
+      { head: "ID", num: true, get: (d) => (d.id === null || d.id === undefined ? "—" : d.id) },
     ], rows));
   }
 
-  // DirectInput lists only about the first hidLimit HID interfaces, and the
-  // pedals vanishing on 2026-10-14 was that limit, not a bad ID. Say so next to
-  // the table rather than leaving a red pill unexplained.
-  const n = data.hidInterfaces || 0, limit = data.hidLimit || 64;
-  if (n) {
-    $("#joy-summary").textContent += (hidden ? " · " : "") + `${n} HID interfaces (limit ~${limit})`;
-    if (n >= limit - 4) $("#joy-summary").className = "summary bad";
-  }
-
+  // DirectInput lists only about the first hidLimit HID interfaces; that limit,
+  // not a bad ID, is what hid the pedals on 2026-10-14. Say so next to the
+  // table rather than leaving a red pill unexplained.
   const out = $("#joy-output");
-  const notes = (data.notes || []).slice();
+  let note = "";
   if (hidden && n) {
-    notes.unshift(`This PC has ${n} HID interfaces and DirectInput lists only about the first ${limit}. ` +
-      "Unplug or disable an input gadget you do not use (wireless dongles add the most); changing IDs will not help.");
+    note = `This PC has ${n} HID interfaces and DirectInput lists only about the first ${limit}. ` +
+      "Unplug or disable an input gadget you do not use — wireless dongles add the most.";
+  } else if (n && n >= limit - 4) {
+    note = `Close to the limit: ${n} HID interfaces. One more input gadget could hide a controller.`;
   }
-  out.textContent = notes.join("\n");
-  out.hidden = notes.length === 0;
-}
-
-async function setJoy(control, alias, id) {
-  control.disabled = true;
-  try {
-    renderJoy(await api("/api/joy", { method: "POST", body: JSON.stringify({ alias, id }) }));
-    toast(id === null ? `${alias}: unpinned` : `${alias}: pinned to ${id}`, "ok");
-  } catch (e) {
-    toast(e.message, "error");
-    loadJoy(); // put the dropdown back to what is actually stored
-  } finally {
-    control.disabled = false;
-  }
+  out.textContent = note;
+  out.hidden = !note;
 }
 
 async function loadJoy() {

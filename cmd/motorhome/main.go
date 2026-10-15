@@ -31,8 +31,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "       motorhome gui [-port N] [-no-open]")
 		fmt.Fprintln(os.Stderr, "       motorhome usb [list|scan] [-v]")
 		fmt.Fprintf(os.Stderr, "       motorhome usb <on|off|toggle> <%s>   (`usb list` names your devices)\n", usbTargetHint())
-		fmt.Fprintln(os.Stderr, "       motorhome joy [list|apply] [-json]")
-		fmt.Fprintln(os.Stderr, "       motorhome joy pin <alias> <id 0-15>  |  joy unpin <alias|all>")
+		fmt.Fprintln(os.Stderr, "       motorhome joy [-json]   (which controllers games can see)")
 		fmt.Fprintln(os.Stderr, "       motorhome shaker [devices]")
 		fmt.Fprintln(os.Stderr, "       motorhome shaker <test|tone> [-device S] [-freq Hz] [-secs N]")
 		flag.PrintDefaults()
@@ -59,7 +58,7 @@ func main() {
 		os.Exit(RunUSB(args[1:], *cfgPath))
 	case "joy":
 		// Same reasoning as usb: listing works from a bare exe with the
-		// built-in device list, and it loads the config itself to save pins.
+		// built-in device list, and it reads the config itself.
 		os.Exit(RunJoy(args[1:], *cfgPath))
 	case "shaker":
 		// Reads nothing from the config either, and is the subcommand most

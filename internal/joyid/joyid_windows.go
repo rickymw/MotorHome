@@ -13,9 +13,6 @@ import (
 )
 
 var (
-	advapi32           = syscall.NewLazyDLL("advapi32.dll")
-	procRegSetValueExW = advapi32.NewProc("RegSetValueExW")
-
 	winmm               = syscall.NewLazyDLL("winmm.dll")
 	procJoyGetDevCapsW  = winmm.NewProc("joyGetDevCapsW")
 	procJoyConfigChange = winmm.NewProc("joyConfigChanged")
@@ -27,10 +24,12 @@ const (
 
 	joystickIDValue = "Joystick Id"
 
-	keySetValue = 0x0002
-	regBinary   = 3
+	regBinary = 3
 
 	errNoMoreItems = syscall.Errno(259)
+
+	// winmmSlots is how many joystick IDs the legacy WinMM API addresses.
+	winmmSlots = 16
 )
 
 // joyCaps is JOYCAPSW. Only the IDs are read, but the struct has to be the full
@@ -57,8 +56,9 @@ type joyCaps struct {
 
 type winStore struct{}
 
-// NewStore returns the Windows implementation. It needs no elevation: the
-// cache lives under HKCU and belongs to the user.
+// NewStore returns the Windows implementation. It only reads, and needs no
+// elevation: the
+// cache lives under HKCU.
 func NewStore() Store { return winStore{} }
 
 func openKey(path string, access uint32) (syscall.Handle, error) {
@@ -166,31 +166,6 @@ func (winStore) Assigned() (map[HWID]int, error) {
 	return out, nil
 }
 
-func (winStore) SetID(hw HWID, id int) error {
-	if id < 0 || id > MaxID {
-		return fmt.Errorf("ID %d is outside 0–%d", id, MaxID)
-	}
-	path, _, ok := idKey(hw)
-	if !ok {
-		return fmt.Errorf("Windows has no joystick entry for %s yet — plug it in once first", hw.Key())
-	}
-	h, err := openKey(path, keySetValue)
-	if err != nil {
-		return err
-	}
-	defer syscall.RegCloseKey(h)
-
-	name, _ := syscall.UTF16PtrFromString(joystickIDValue)
-	data := make([]byte, 4)
-	binary.LittleEndian.PutUint32(data, uint32(id))
-	r, _, _ := procRegSetValueExW.Call(uintptr(h), uintptr(unsafe.Pointer(name)), 0, regBinary,
-		uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)))
-	if r != 0 {
-		return syscall.Errno(r)
-	}
-	return nil
-}
-
 // Visible lists the controllers DirectInput 8 enumerates — the API iRacing and
 // MAIRA use — with the slot each answers to in the legacy joystick API, or None.
 //
@@ -209,7 +184,7 @@ func (winStore) Visible() (map[HWID]int, error) {
 	procJoyConfigChange.Call(0)
 
 	slots := map[HWID]int{}
-	for id := 0; id <= MaxID; id++ {
+	for id := 0; id < winmmSlots; id++ {
 		var c joyCaps
 		r, _, _ := procJoyGetDevCapsW.Call(uintptr(id), uintptr(unsafe.Pointer(&c)), unsafe.Sizeof(c))
 		if r != 0 {
@@ -232,8 +207,6 @@ func (winStore) Visible() (map[HWID]int, error) {
 	}
 	return out, nil
 }
-
-func (winStore) Notify() { procJoyConfigChange.Call(0) }
 
 var (
 	dinput8                = syscall.NewLazyDLL("dinput8.dll")

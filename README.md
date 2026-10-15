@@ -40,7 +40,7 @@ motorhome [-config <path>] <start|stop|status|analyze|coach|pb|notes|live|camera
 
 | Subcommand | Description |
 |---|---|
-| `start` | Launch all configured apps in order (re-applying any joystick pins first) |
+| `start` | Launch all configured apps in order (warning first if a controller is hidden from games) |
 | `stop` | Kill all configured apps |
 | `status` | Print running/stopped state and PID |
 | `analyze` | Parse an `.ibt` file and print lap telemetry |
@@ -50,7 +50,7 @@ motorhome [-config <path>] <start|stop|status|analyze|coach|pb|notes|live|camera
 | `live` | Live position + gap in seconds to the car directly ahead and behind on track |
 | `camera` | Restart a stuck/frozen webcam by restarting the Windows Camera Frame Server |
 | `usb` | List, scan for, and enable/disable the sim-racing USB devices |
-| `joy` | Show each controller's joystick ID and whether games can see it; pin devices to fixed IDs |
+| `joy` | Show whether games can see each controller, and how close the PC is to DirectInput's HID limit |
 | `shaker` | Test a ButtKicker / tactile transducer with a gentle low-frequency ramp |
 | `gui` | Serve the web interface on `127.0.0.1` — rig control, settings, analysis, live telemetry, personal bests |
 
@@ -558,51 +558,49 @@ See [internal/usbdev/README.md](internal/usbdev/README.md) for why devices are m
 
 ---
 
-## Joystick IDs
+## Game Controllers
 
-Games that use DirectInput number your controllers 0–15, and Windows reshuffles
-those numbers when devices come and go. `joy` shows the order and whether a game
-started now would see each device, and pins devices to fixed IDs.
+`joy` answers "would a game started now see my controllers?" — each rig device,
+whether DirectInput (what iRacing and MAIRA use) lists it, and how many HID
+input interfaces the PC has.
 
 ```powershell
-.\motorhome.exe joy                    # ID table, with a "Games" column
-.\motorhome.exe joy pin pedals 0       # hold the pedals at ID 0
-.\motorhome.exe joy unpin pedals       # stop holding them (the ID stays as it is)
-.\motorhome.exe joy unpin all
-.\motorhome.exe joy apply              # put every pinned device back now
-.\motorhome.exe joy -json              # the table as JSON (what the GUI reads)
+.\motorhome.exe joy          # the table
+.\motorhome.exe joy -json    # the same as JSON (what the GUI reads)
 ```
 
 ```
-Joystick IDs
+Game controllers
 
-  ID  Pin  Games  Alias       Device
-    0    0 yes    pedals      Heusinkveld Sim Pedals Sprint
-    1    - yes    haptic      SIMAGIC P2000 Haptic
-    2    - yes    rim         SIMAGIC Neo X
-    3    - yes    wheelbase   SIMAGIC Alpha EVO Pro
-    4    - yes    handbrake   MOZA HBP Handbrake
+  ID  Games  Alias       Device
+    0 yes    handbrake   MOZA HBP Handbrake
+    1 yes    haptic      SIMAGIC P2000 Haptic
+    2 yes    rim         SIMAGIC Neo X
+    3 yes    wheelbase   SIMAGIC Alpha EVO Pro
+    4 yes    pedals      Heusinkveld Sim Pedals Sprint
+
+  HID interfaces: 62 (DirectInput lists only about the first 64)
+  Close to the limit: one more input gadget could hide a controller.
 ```
 
-Pinning onto an ID someone else holds swaps the two. Pins are saved under
-`joyPins` in the config and re-applied by `motorhome start`, which also warns if
-a connected controller is invisible to games. A game that is already running
-keeps the old order until it is restarted. No admin rights are needed.
+`motorhome start` runs the same check and warns if a connected controller is
+hidden. It only reads; no admin rights are needed.
 
-**A `NO` in the Games column is not something an ID change fixes.** It means
-DirectInput does not list the device at all. The usual cause is having too many
-HID input interfaces: DirectInput only lists about the first 64, and every
-keyboard, mouse, receiver, touchscreen and dongle adds several. When something is
-hidden the table prints the count. Unplug or disable an input gadget you don't
-use — on this rig an idle Steam Controller dongle accounted for 13, and removing
-it brought the pedals back with Corsair iCUE and the Xeneon Edge still running.
+**A `NO` in the Games column almost always means too many HID input
+interfaces.** DirectInput only lists about the first 64, and every keyboard,
+mouse, receiver, touchscreen and dongle adds several — the controller that sits
+last in the list simply vanishes, while still working in its own software. On
+this rig an idle Steam Controller dongle accounted for 13; unplugging it brought
+the pedals back with Corsair iCUE and the Xeneon Edge still running. Unplug or
+disable an input gadget you don't use.
 
-**Do not clear Windows' joystick cache to fix ordering.** Each device's entry
-also holds the GUID that games and tools like MAIRA save bindings against;
-deleting it makes Windows invent new ones and every binding goes missing. It
-also removes the wheelbase's force-feedback driver registration, which Windows
-does not put back.
-Pinning changes only the ID and leaves the GUID alone.
+**Do not clear Windows' joystick cache to fix it.** Each device's entry holds the
+GUID that iRacing and MAIRA save bindings against; deleting it makes Windows
+invent new ones and every binding goes missing. It also removes the wheelbase's
+force-feedback driver registration, which Windows does not put back.
+
+There is no joystick-ID pinning: iRacing and MAIRA bind by GUID, not slot
+number, so the order of the ID column doesn't affect them.
 
 See [internal/joyid/README.md](internal/joyid/README.md).
 
@@ -687,7 +685,6 @@ See [internal/shaker/README.md](internal/shaker/README.md) for the envelope and 
 | `whisperModel` | Path to Whisper `.bin` model file |
 | `apps[].processName` | Exe stem for `tasklist`/`taskkill`. Falls back to `name`. Set this if the app spawns a child process with a different image name. |
 | `usbDevices` | Your sim hardware: `{alias, name, vid, pid}` per device, IDs as hex strings. Leave it out to use the built-in list. Easiest filled in from **Rig → Scan for devices** in the GUI. |
-| `joyPins` | Joystick ID pins, `{"<alias>": <id>}`. Written by `joy pin` and the GUI's Joystick IDs card; re-applied by `start`. |
 
 ---
 
@@ -703,7 +700,7 @@ Five panels:
 
 | Panel | What it does |
 |---|---|
-| **Rig** | Start/stop/status of the configured apps, all at once or one at a time, USB device toggles and a scanner for adding new ones, joystick IDs with per-device pins, camera restart |
+| **Rig** | Start/stop/status of the configured apps, all at once or one at a time, USB device toggles and a scanner for adding new ones, a game-controller visibility check, camera restart |
 | **Live** | Position, lap timing and deltas, fuel with a running per-lap burn estimate, and track conditions, streamed at 2–30 Hz. Each value is labelled with the iRacing variable it came from |
 | **Sessions** | Pick an `.ibt` and render the full analysis — laps, sectors, phases, vs-PB deltas, exit impact, tyres, consistency, fuel, voice notes |
 | **Personal bests** | Browse `pb.json`; open an entry for its setup, phase data and stored brake points |
@@ -734,7 +731,7 @@ Nothing is reimplemented. Status and start/stop call the same `internal/launcher
 functions the CLI prints from; the analysis panel re-runs `motorhome analyze
 -json` as a subprocess (so a bad lap number returns an error instead of killing
 the server); USB toggles go through `motorhome usb`, which already handles the
-UAC elevation; the joystick ID card re-runs `motorhome joy -json`, because
+UAC elevation; the game controllers card re-runs `motorhome joy -json`, because
 only a freshly started process sees controllers the way a newly launched game
 does; and the live panel builds position and lap with the same helpers
 `motorhome live` uses.
@@ -772,7 +769,7 @@ go test -tags e2e -v ./internal/launcher/ -run TestE2E_FullStack -timeout 120s  
 | `internal/audio` | Microphone recording via WinMM | [README](internal/audio/README.md) |
 | `internal/camera` | Restarts the Windows Camera Frame Server | [README](internal/camera/README.md) |
 | `internal/usbdev` | Identifies sim-racing USB devices and enables/disables them | [README](internal/usbdev/README.md) |
-| `internal/joyid` | Reads and pins DirectInput joystick IDs; checks what games can see | [README](internal/joyid/README.md) |
+| `internal/joyid` | Checks which controllers DirectInput lists, and the HID interface count | [README](internal/joyid/README.md) |
 | `internal/shaker` | Plays low-frequency test tones at a tactile transducer | [README](internal/shaker/README.md) |
 | `internal/gui` | Local web interface served by `motorhome gui` | [README](internal/gui/README.md) |
 

@@ -26,7 +26,7 @@ is how this rig is often used.
 | `sessions.go` | `/api/sessions` listing, `/api/analyze` proxy |
 | `pbview.go` | `/api/pb` list and detail |
 | `devices.go` | `/api/usb` list, set and scan; `/api/camera` |
-| `joy.go` | `/api/joy` GET (ID table) and POST (pin / unpin), both via a `joy -json` re-exec |
+| `joy.go` | `/api/joy` GET — the game-controller check, via a `joy -json` re-exec |
 | `shaker.go` | `/api/shaker` status, run and stop |
 | `live.go` | `/api/live` snapshot, `/api/live/stream` SSE |
 | `static/` | `index.html`, `app.js`, `style.css`, `logo.svg`, embedded via `go:embed` |
@@ -89,15 +89,14 @@ browser path and the Stream Deck path elevate the same way and there is only one
 place where that has to be right. Enumeration stays in-process; it needs no
 rights.
 
-**`joy`** (`joy.go`) — the Joystick IDs card. Nothing here needs elevation and
-the registry reads would be easy in-process, but the question the card answers
-— would a game launched now see this controller? — can only be answered by a
-process that has just started. A program builds its controller list at startup
-and keeps it, and a process started before a device dropped out went on seeing
-it (observed on 2026-10-14). The page sends `{alias, id}`; `id: null` unpins.
-`-json` goes ahead of the operands, and `"all"` is refused so a page bug cannot
-clear every pin. A refusal from the command comes back as a 409 carrying its
-own message.
+**`joy`** (`joy.go`) — the Game controllers card, read-only. Nothing here needs
+elevation and the reads would be easy in-process, but the question the card
+answers — would a game launched now see this controller? — can only be answered
+by a process that has just started: a program builds its controller list at
+startup and keeps it. The card shows the HID interface count beside the table
+and explains a hidden device in terms of it, since that limit is what hid the
+pedals on 2026-10-14. There is no write route; pinning was removed.
+
 
 ## Starting and stopping one app
 

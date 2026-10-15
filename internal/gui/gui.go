@@ -163,7 +163,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/usb", s.handleUSBSet)
 	mux.HandleFunc("GET /api/usb/scan", s.handleUSBScan)
 	mux.HandleFunc("GET /api/joy", s.handleJoyList)
-	mux.HandleFunc("POST /api/joy", s.handleJoySet)
 	mux.HandleFunc("POST /api/camera", s.handleCamera)
 
 	mux.HandleFunc("GET /api/shaker", s.handleShakerStatus)

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rickymw/MotorHome/internal/joyid"
 	"github.com/rickymw/MotorHome/internal/usbdev"
 )
 
@@ -24,17 +23,6 @@ type Config struct {
 	// omitempty so an existing config file that has never named a device does
 	// not grow a null field the first time it is saved.
 	USBDevices []USBDevice `json:"usbDevices,omitempty"`
-
-	// JoyPins holds devices at chosen joystick IDs, keyed by usb alias. Written
-	// by `motorhome joy pin` and the GUI, and re-applied by `motorhome start`,
-	// because Windows reassigns IDs when devices come and go and a pin that
-	// only held until the next reshuffle would not be a pin.
-	//
-	// Keyed by alias rather than VID/PID so the file reads as "pedals: 0".
-	// An alias that no longer names a device is ignored with a warning when
-	// pins are applied, not rejected here: failing the whole config load over
-	// a renamed device would take every other subcommand down with it.
-	JoyPins map[string]int `json:"joyPins,omitempty"`
 }
 
 // USBDevice identifies one piece of sim-racing hardware by USB vendor/product
@@ -83,34 +71,7 @@ func (cfg Config) Validate() error {
 			return fmt.Errorf("app %q: invalid windowStyle %q (valid: Normal, Hidden)", app.Name, app.WindowStyle)
 		}
 	}
-	if err := cfg.validateUSBDevices(); err != nil {
-		return err
-	}
-	return cfg.validateJoyPins()
-}
-
-// validateJoyPins checks the IDs are addressable and distinct. Two devices
-// pinned to one ID could never both hold it; applying them would swap the pair
-// back and forth on every `start`.
-func (cfg Config) validateJoyPins() error {
-	byID := map[int]string{}
-	for alias, id := range cfg.JoyPins {
-		if strings.TrimSpace(alias) == "" {
-			return fmt.Errorf("joyPins: empty device alias")
-		}
-		if id < 0 || id > joyid.MaxID {
-			return fmt.Errorf("joyPins: %s is pinned to %d, outside 0–%d", alias, id, joyid.MaxID)
-		}
-		if prev, dup := byID[id]; dup {
-			a, b := prev, alias
-			if b < a {
-				a, b = b, a
-			}
-			return fmt.Errorf("joyPins: %s and %s are both pinned to %d", a, b, id)
-		}
-		byID[id] = alias
-	}
-	return nil
+	return cfg.validateUSBDevices()
 }
 
 // validateUSBDevices checks the device list.

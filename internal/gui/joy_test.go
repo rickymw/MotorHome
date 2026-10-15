@@ -6,9 +6,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rickymw/MotorHome/internal/joyid"
 )
 
-const joyDoc = `{"devices":[{"alias":"pedals","name":"Heusinkveld Sim Pedals Sprint","hardwareId":"VID_30B7&PID_1001","id":0,"pinned":0,"connected":true,"visible":true,"hidden":false}],"maxId":15,"notes":["Pinned pedals to ID 0."]}`
+const joyDoc = `{"devices":[{"alias":"pedals","name":"Heusinkveld Sim Pedals Sprint","hardwareId":"VID_30B7&PID_1001","id":4,"connected":true,"visible":false,"hidden":true}],"hidInterfaces":75,"hidLimit":64}`
 
 func joyServer(t *testing.T, run func(args ...string) ([]byte, error)) *Server {
 	t.Helper()
@@ -30,69 +32,33 @@ func TestJoyListReExecs(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body)
 	}
-	if strings.Join(got, " ") != "joy list -json" {
+	if strings.Join(got, " ") != "joy -json" {
 		t.Errorf("argv = %v", got)
 	}
-	r := decode[joyResponse](t, w)
-	if len(r.Devices) != 1 || r.Devices[0].ID == nil || *r.Devices[0].ID != 0 || r.MaxID != 15 {
-		t.Errorf("report = %+v", r.Report)
+	r := decode[joyid.Report](t, w)
+	if len(r.Devices) != 1 || !r.Devices[0].Hidden || r.HIDInterfaces != 75 || r.HIDLimit != 64 {
+		t.Errorf("report = %+v", r)
 	}
 }
 
-func TestJoySetPinAndUnpin(t *testing.T) {
-	var got []string
+// Pinning was removed; the route no longer accepts writes.
+func TestJoyHasNoWriteRoute(t *testing.T) {
 	s := joyServer(t, func(args ...string) ([]byte, error) {
-		got = args
-		return []byte(joyDoc), nil
-	})
-
-	if w := do(t, s, "POST", "/api/joy", `{"alias":"pedals","id":0}`); w.Code != http.StatusOK {
-		t.Fatalf("pin status = %d: %s", w.Code, w.Body)
-	}
-	// -json goes ahead of the operands, where the flag parser will see it.
-	if strings.Join(got, " ") != "joy pin -json pedals 0" {
-		t.Errorf("pin argv = %v", got)
-	}
-
-	if w := do(t, s, "POST", "/api/joy", `{"alias":"pedals","id":null}`); w.Code != http.StatusOK {
-		t.Fatalf("unpin status = %d", w.Code)
-	}
-	if strings.Join(got, " ") != "joy unpin -json pedals" {
-		t.Errorf("unpin argv = %v", got)
-	}
-}
-
-func TestJoySetRejectsBadRequests(t *testing.T) {
-	s := joyServer(t, func(args ...string) ([]byte, error) {
-		t.Errorf("a bad request reached the subcommand: %v", args)
+		t.Errorf("a POST reached the subcommand: %v", args)
 		return nil, nil
 	})
-	for _, body := range []string{
-		`{"alias":"","id":1}`,
-		`{"alias":"-json","id":1}`,
-		`{"alias":"all","id":null}`, // the panel acts on one row; never clear every pin
-		`{"alias":"pedals","id":16}`,
-		`{"alias":"pedals","id":-1}`,
-		`not json`,
-	} {
-		if w := do(t, s, "POST", "/api/joy", body); w.Code != http.StatusBadRequest {
-			t.Errorf("%s: status = %d, want 400", body, w.Code)
-		}
+	if w := do(t, s, "POST", "/api/joy", `{"alias":"pedals","id":0}`); w.Code == http.StatusOK {
+		t.Errorf("POST /api/joy succeeded; pinning should be gone")
 	}
 }
 
-// A refusal from the command comes back as its own message, not a bare
-// "exit status 1".
-func TestJoySetReportsTheCommandsRefusal(t *testing.T) {
+func TestJoyReportsTheCommandsFailure(t *testing.T) {
 	s := joyServer(t, func(...string) ([]byte, error) {
-		return []byte("joy pin: no device matches \"pedls\"\n"), errors.New("exit status 1")
+		return []byte("joy: DirectInput8Create failed: 0x80004005\n"), errors.New("exit status 1")
 	})
-	w := do(t, s, "POST", "/api/joy", `{"alias":"pedls","id":0}`)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("status = %d", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "no device matches") {
-		t.Errorf("body = %s", w.Body)
+	w := do(t, s, "GET", "/api/joy", "")
+	if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), "DirectInput8Create") {
+		t.Errorf("status = %d body = %s", w.Code, w.Body)
 	}
 }
 
