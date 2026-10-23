@@ -34,6 +34,8 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath, notesDir
 		"seconds subtracted from each voice note's timestamp before placing it on track")
 	jsonOut := fs.Bool("json", false, "emit the full analysis as JSON instead of tables")
 	fuelLaps := fs.Int("fuel-laps", 0, "with fuel data: report the litres needed to complete this many laps")
+	mapOut := fs.Bool("map", false, "write an SVG outline of the analysed lap next to the .ibt")
+	highlight := fs.String("highlight", "", "with -map: segments to highlight, comma-separated, each optionally NAME:caption (e.g. T6:Turn in later)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: motorhome [-config <path>] analyze [flags] <file.ibt>")
 		fmt.Fprintln(os.Stderr)
@@ -46,6 +48,7 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath, notesDir
 		fmt.Fprintln(os.Stderr, "  motorhome analyze -trace T3,T4       (sample-level telemetry inline)")
 		fmt.Fprintln(os.Stderr, "  motorhome analyze -trace T3 -hz 20")
 		fmt.Fprintln(os.Stderr, "  motorhome analyze -json session.ibt")
+		fmt.Fprintln(os.Stderr, "  motorhome analyze -map -highlight \"T6:Turn in later,T3\"")
 		fmt.Fprintln(os.Stderr)
 		fs.PrintDefaults()
 	}
@@ -53,6 +56,9 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath, notesDir
 
 	if *dumpAll && *dumpSeg == "" {
 		analyzeDie("-dump-all has no effect without -dump <segment>")
+	}
+	if *highlight != "" && !*mapOut {
+		analyzeDie("-highlight has no effect without -map")
 	}
 	if *hz != 0 {
 		if *hz < 1 || *hz > analysis.SampleRateHz {
@@ -536,6 +542,10 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath, notesDir
 	if *traceSeg != "" {
 		traces = buildSegmentTraces(*traceSeg, segs, laps, comparableLaps, lapNum, *hz)
 		printTraces(traces)
+	}
+
+	if *mapOut {
+		runTrackMap(ibtPath, laps, lapNum, segs, *highlight, meta.TrackDisplayName)
 	}
 
 	if *jsonOut {

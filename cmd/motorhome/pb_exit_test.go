@@ -50,6 +50,16 @@ func TestMain(m *testing.M) {
 		buildSegmentTraces("T1", nil, exitCaseTraceLaps(), exitCaseTraceLaps(), 0, 0)
 	case "analyze-trace-no-map":
 		buildSegmentTraces("T1", nil, exitCaseTraceLaps(), exitCaseTraceLaps(), 0, 0)
+	case "analyze-highlight-without-map":
+		RunAnalyze([]string{"-highlight", "T1"}, config.Config{}, "", "", "")
+	case "coach-highlight-without-map":
+		RunCoach([]string{"-highlight", "T1"}, config.Config{}, "", "", "", "")
+	case "map-highlight-unknown":
+		runTrackMap(filepath.Join(os.TempDir(), "x.ibt"), []analysis.Lap{mapTestLap(3)}, 0,
+			mapTestSegs(), "T9", "Test Ring")
+	case "map-highlight-no-track-map":
+		runTrackMap(filepath.Join(os.TempDir(), "x.ibt"), []analysis.Lap{mapTestLap(3)}, 0,
+			nil, "T1", "Test Ring")
 
 	// The GUI's subcommandRunner cases. They are here rather than in their own
 	// TestMain because a package gets only one, and they need the same re-exec

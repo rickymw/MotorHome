@@ -43,6 +43,8 @@ func RunCoach(args []string, cfg config.Config, trackmapPath, pbPath, notesDir, 
 	fuelLaps := fs.Int("fuel-laps", 0, "also report the fuel needed to complete this many laps")
 	segment := fs.String("segment", "", "focus on these corners: comma-separated names or 1-based indices (e.g. T3,T4)")
 	hz := fs.Int("hz", 0, "sample rate for the traces -segment inlines (default 60)")
+	mapOut := fs.Bool("map", false, "also write an SVG outline of the lap next to the .ibt (path on stderr)")
+	highlight := fs.String("highlight", "", "with -map: segments to highlight, each optionally NAME:caption (default: the -segment corners)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: motorhome [-config <path>] coach [flags] [file.ibt]")
 		fmt.Fprintln(os.Stderr)
@@ -55,6 +57,7 @@ func RunCoach(args []string, cfg config.Config, trackmapPath, pbPath, notesDir, 
 		fmt.Fprintln(os.Stderr, "  motorhome coach -segment T3       (one corner, with its samples)")
 		fmt.Fprintln(os.Stderr, "  motorhome coach -segment T3,T4 -hz 20")
 		fmt.Fprintln(os.Stderr, "  motorhome coach -table             (turn-by-turn table, for a human)")
+		fmt.Fprintln(os.Stderr, "  motorhome coach -map -highlight \"T6:Turn in later\"")
 		fmt.Fprintln(os.Stderr, "  motorhome coach session.ibt")
 		fmt.Fprintln(os.Stderr)
 		fs.PrintDefaults()
@@ -92,6 +95,17 @@ func RunCoach(args []string, cfg config.Config, trackmapPath, pbPath, notesDir, 
 		analyzeArgs = append(analyzeArgs, "-trace", *segment)
 		if *hz > 0 {
 			analyzeArgs = append(analyzeArgs, "-hz", fmt.Sprint(*hz))
+		}
+	}
+	if *highlight != "" && !*mapOut {
+		coachDie("-highlight has no effect without -map")
+	}
+	// A focused brief is about those corners, so they are what the map shows
+	// unless told otherwise.
+	if *mapOut {
+		analyzeArgs = append(analyzeArgs, "-map")
+		if hl := fallback(*highlight, *segment); hl != "" {
+			analyzeArgs = append(analyzeArgs, "-highlight", hl)
 		}
 	}
 	analyzeArgs = append(analyzeArgs, fs.Args()...)

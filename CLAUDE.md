@@ -96,12 +96,15 @@ motorhome analyze -trace T3 -hz 20                  # same, downsampled to 20Hz
 motorhome analyze -json session.ibt                 # emit the whole analysis as JSON instead of tables
 motorhome analyze -note-lag 3 session.ibt           # shift voice notes 3s earlier when placing them
 motorhome analyze -fuel-laps 12                     # litres needed to complete 12 more laps
+motorhome analyze -map                              # SVG outline of the lap, next to the .ibt (path on stderr)
+motorhome analyze -map -highlight "T6:Turn in later,T3"  # with segments painted and captioned
 motorhome coach                                     # self-contained coaching brief for an AI assistant
 motorhome coach -lap 3                              # coach a specific lap
 motorhome coach -no-framework                       # data only, without the embedded framework
 motorhome coach -table                              # turn-by-turn table for a human, not the AI brief
 motorhome coach -segment T3                         # focus on one corner, with its sample-level telemetry
 motorhome coach -segment T3,T4 -hz 20               # two corners, traces downsampled to 20Hz
+motorhome coach -map -highlight "T6:Turn in later"  # also write the lap's track map with T6 painted on it
 motorhome pb                                        # list every stored personal best
 motorhome pb show watkins                           # full record (setup + phases) for one entry
 motorhome pb diff                                   # setup changes since the PB for this session's car/track
@@ -148,6 +151,8 @@ When a finding needs the samples rather than the aggregates — pedal timing, wh
 
 The focused brief carries a `Focus:` line: everything outside those corners has been removed, so do not characterise the lap as a whole or rank the focused corners against the rest from it. Reach for this *after* the full brief has identified the corner, not instead of it.
 
+Once the debrief's corners are chosen, draw them: `analyze -map -highlight "T6:Turn in later,T3:Also coasting"` (captions are the short instruction, in the debrief's words) writes an SVG next to the `.ibt` and prints its path on stderr. Producing it costs one stderr line; showing it inline means reading the ~15 KB file, so do that once per debrief, not per draft.
+
 `analyze` remains the human-facing view (formatted tables, auto-copied to the clipboard); `coach` is the machine-facing one. There is no API key and no network call — the assistant reading the brief *is* the coach.
 
 ## Architecture
@@ -162,7 +167,7 @@ Each package has its own README with full detail. Below is a terse summary with 
 | `internal/ibt` | Low-level `.ibt` binary parser; `File.Sample(i)` typed accessor; session YAML decoded to UTF-8 at open | [README](internal/ibt/README.md) |
 | `internal/textenc` | `Decode` (Windows-1252 → UTF-8, valid UTF-8 untouched); `LegacyJSONName` for finding keys stored before decoding | [README](internal/textenc/README.md) |
 | `internal/analysis` | `ExtractLaps`, `ComputePhases`, `ComputeBrakeEntries`, `ComputeTyreSummary`, `ComputeConsistency`, `ComputeFuel`, `LocateNotes`, `DumpSegmentCSV`/`DumpSegmentAllLapsCSV`, `FlattenSetup`/`DiffSetups`, `ParseSessionMeta`, `ParseSectors`/`ComputeSectorTimes` | [README](internal/analysis/README.md) |
-| `internal/trackmap` | GPS curvature corner detection (`latlon`) with steering/speed/lat-G validation; fallback `lataccel`; `trackmap.json` load/save | [README](internal/trackmap/README.md) |
+| `internal/trackmap` | GPS curvature corner detection (`latlon`) with steering/speed/lat-G validation; fallback `lataccel`; `trackmap.json` load/save; `RenderSVG` track-map drawing | [README](internal/trackmap/README.md) |
 | `internal/pb` | Personal best store; `pb.Update` returns true on new PB; `PBPhase` stores per-segment data for delta comparison | [README](internal/pb/README.md) |
 | `internal/notes` | `Note{Timestamp,Text}`/`Session` types; `AppendNote` load→append→save | [README](internal/notes/README.md) |
 | `internal/iracing` | `ReadLiveData()` snapshot from iRacing shared memory (Windows-only), including player lap timing, fuel and weather; `ParseDrivers`, `ComputeGaps` for gap-to-car math, `FuelTracker` for live per-lap burn (cross-platform) | [README](internal/iracing/README.md) |
@@ -272,6 +277,13 @@ Traces cover **every comparable lap**, not just the analysed one — comparing l
 `-hz N` sets the output rate for `-dump` and `-trace` (defaults: 20Hz for dump, 60Hz for trace) and is rejected without one of them. Rates that don't divide 60 evenly round to the nearest stride, so `DumpConfig.OutputHz` reports what was actually emitted rather than what was asked for.
 
 **ABS and Coast are maxima over the window each row covers, not point samples.** Decimation suits continuous channels — speed read every third sample is still speed — but these two are 0/1 events, and taking every third one discarded two thirds of every ABS activation, so a lock-up lasting a few frames could vanish from a 20Hz dump entirely. That is the exact signal someone dumping a problem corner is looking for. This changed the existing `-dump` output too, and both dump headers now disclose it below 60Hz. Above 2000 trace rows a stderr note reports the size and suggests `-hz 20`, which — now that the binary channels survive downsampling — costs resolution on the continuous traces and nothing else.
+
+### Track map drawing (`-map`, `-highlight`)
+`-map` writes `<ibt name>_map.svg` next to the `.ibt`: the analysed lap's GPS outline with every corner labelled, start/finish and direction of travel marked. `-highlight "T6:caption,T3"` paints segments and captions them (`cmd/motorhome/analyze_map.go`; drawing in `trackmap.RenderSVG`). It exists because the debrief describes corners by landmark only for want of a picture.
+
+The path goes to **stderr**, like warnings, so it survives `-json` and `coach -map` can report it without changing the brief. Highlight names resolve like `-trace`'s — an unknown one fails the whole spec, since a map missing the corner the debrief is about points the driver at the wrong place. `coach -map -segment T3` highlights the focused corners by default.
+
+Two rendering choices that were wrong first time: the 60Hz outline is thinned to one point per 2px (~150 KB → ~15 KB, which is what an assistant pays to show it), and labels are placed by searching candidate spots for clearance from the track and each other, not by pushing them "outward" — tracks aren't convex, and on the real Kurzanbindung map that rule put both highlighted captions on the track.
 
 The map line branches on whether a stored map was used, not on whether a match score was computed. A stored map with no comparable lap (no valid flying lap, or no track length in the YAML) prints its real geometry confidence, lap/session counts and `GeoMethod` with `match: n/a (no comparable lap)`. Keying this off the match score previously made those sessions report a mature map as a fresh `geometry: low` "first detection".
 
@@ -726,6 +738,7 @@ All live next to the binary in `G:\RACING\SimAppLauncher\`:
 - Voice notes are placed by wall clock, so their accuracy is bounded by `-note-lag` being an estimate; a note about a corner can land in the adjacent segment
 - `coach -segment` and `analyze -trace` need a track map to name corners against, so neither works on the first session at a new track (nothing to resolve `T3` to yet)
 - A focused trace is large: one long corner complex across five comparable laps at 60Hz is ~3,900 rows, several times the whole unfocused brief. `-hz 20` cuts it to about a third and no longer loses ABS or lock-ups, but the default is not free
+- `-map` draws the GPS trace of one lap, so an off-line moment (a spin, a cut) is drawn as the track. Label widths are estimated at 7px per character, not measured, so a label can still clip at the edge in an unusually wide font. `-highlight` captions cannot contain a comma, which separates entries
 - `pb diff` compares by setup-field path, so it cannot tell a genuine change from a field iRacing renamed between builds — those show as one added plus one removed field
 - `gui` runs in the foreground until Ctrl-C. A Stream Deck button pointed at it leaves a console window open; there is no tray icon and no background/detach mode
 - `gui` serves one user on one machine by design (loopback only, no auth). Reaching it from a phone or tablet would need a bind-address change *and* something in front of it — the guard is not a login

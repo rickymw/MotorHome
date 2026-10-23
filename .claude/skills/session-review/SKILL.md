@@ -311,6 +311,26 @@ trail-braking" can't be done from the seat. These can:
 - use one gear lower / higher
 - look further ahead — to the apex or exit — earlier
 
+## 9. Show the corners on a map
+
+Once the items are chosen, draw them, so the driver sees *where* rather than
+decoding a landmark description:
+
+```powershell
+.\motorhome.exe analyze -map -highlight "T6:Turn in later,T3:Also coasting"
+```
+
+One entry per coaching item (and the *Also found* corner if it has one), the
+caption being the item's short instruction in the debrief's own words — a few
+words, no commas. The SVG lands next to the `.ibt` and its path is printed on
+stderr. Show it to the driver once with the debrief (read the file and render
+it inline, or give them the path to open); it is ~15 KB, so don't re-read it
+for every draft. The landmark descriptions in the text stay — the map
+supports them, it doesn't replace them.
+
+Pass the same `.ibt` (or index) the debrief was built from: if the driver has
+recorded since, "most recent" is a different session.
+
 ## Going deeper
 
 If the driver wants more on one corner, translate the landmark back to its

@@ -21,6 +21,7 @@ Geometry-based corner/straight detection and persistent track segment storage.
 | `util.go` | Bucket math, merge helpers, `MatchScore`, `labelSegments`: `allZero`, `bucketMean`, `bucketMinMax`, `fillGaps`, `boxSmooth`, `hysteresis`, `groupBuckets`, `avgSign`, `mergeShort`, `mergeIdx`, `mergeAt`, `mergeChicanes` |
 | `trackmap.go` | `TrackMap`, `TrackMapFile`, `Segment`, `Load`, `Save` (atomic write-to-temp-then-rename), confidence logic |
 | `trackref.go` | `TrackRef`, `TrackRefFile`, `LoadTrackRef` |
+| `svg.go` | `RenderSVG` — draws one lap's GPS outline with segments labelled and selected ones highlighted (`MapOptions`, `Highlight`) |
 
 ### Detection pipeline
 
@@ -73,6 +74,19 @@ Names are applied in memory on each run and are deliberately *not* written to `t
 
 `MatchScore` re-runs the lataccel pipeline on the current session's best lap and checks whether each stored boundary has a transition within ±2%. Always uses lataccel for consistency. Returns 0.0–1.0.
 
+### Map rendering (`svg.go`)
+
+`RenderSVG(w, samples, segs, MapOptions)` writes a standalone SVG of one lap's outline. It exists so a debrief can *show* a corner: the segment names are positional, and "the last corner onto the start/finish straight" only works for a driver who already knows the circuit. Used by `analyze -map` / `coach -map`.
+
+- **The outline is the lap's own GPS trace**, projected equirectangular, north up, scaled to a 680px-wide viewBox. Samples without a fix (Lat and Lon both 0) are skipped — projected, they would land in the Gulf of Guinea and shrink the track to a dot. Fewer than 20 fixes returns `ErrNoGPS`.
+- **Points are thinned** to one per 2px of outline. A 60Hz lap is ~5,000 points, about ten per pixel; thinning takes the file from ~150 KB to ~15 KB with no visible change, which matters when an assistant has to read the file to show it.
+- **Corners and chicanes are labelled; straights are not**, unless highlighted. Highlighted segments are drawn thicker in a contrasting colour, on top, with a bold label and a caption wrapped to 18-character lines.
+- **A segment that wraps across S/F is drawn as two runs.** As one polyline the join would cut across the infield.
+- **Label placement is a search, not a rule.** "Push the label outward, away from the centre" was tried first and fails on a real circuit: tracks are not convex, so the outside of one corner is often the inside of the next, and a long caption clamped at the drawing's edge got pushed straight back over the line. `labeler.place` tries five spots along the segment, either side, at five distances, and takes the first box with 12px clearance from every track point and every earlier label — otherwise the one with the most. Highlighted labels are placed first so they get the clearest spots; the header lines are registered as occupied so the rest of the top margin is usable.
+- **Colours live in one `<style>` block with a `prefers-color-scheme: dark` variant**, since the file is opened in whatever viewer is at hand.
+
+Label widths are estimated (7px per character), not measured, so an unusually wide font can still clip a label at the edge.
+
 ### Persistent storage (`trackmap.go`)
 
 `trackmap.json` is a flat JSON map keyed by `TrackDisplayName`. Each entry (`TrackMap`) stores:
@@ -98,6 +112,7 @@ Each `Segment` stores geometric boundaries (`entryPct`/`exitPct`) and an optiona
 | `TrackRefFile` | Top-level JSON type for `trackref.json`: `map[string]*TrackRef`. |
 | `ApplyCornerNames` | Renames corner/chicane segments in track order from a `cornerNames` list. All-or-nothing on length. |
 | `CountCorners` | Number of corner + chicane segments — the count `cornerNames` must match. |
+| `RenderSVG` | Writes one lap's outline as SVG, with `MapOptions.Highlights` painted and captioned. `ErrNoGPS` without position data. |
 
 ### Key functions
 

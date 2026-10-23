@@ -105,6 +105,8 @@ Use the **Open** action pointing directly at `motorhome.exe` — no PowerShell w
 .\motorhome.exe analyze -dump T3 -dump-all       # dump T3 from every comparable lap into one CSV
 .\motorhome.exe analyze -trace T3,T4             # print T3/T4 sample telemetry inline (60Hz)
 .\motorhome.exe analyze -trace T3 -hz 20         # same, downsampled to 20Hz
+.\motorhome.exe analyze -map                     # SVG track map of the lap, written next to the .ibt
+.\motorhome.exe analyze -map -highlight "T6:Turn in later,T3"   # with corners painted and captioned
 .\motorhome.exe analyze -json                    # structured output instead of tables
 .\motorhome.exe analyze -note-lag 3              # shift voice notes 3s earlier when placing them
 ```
@@ -315,6 +317,10 @@ That's the difference between "your T2-3 exit varies by 19 km/h" and "on lap 6 y
 The brief says in its orientation that it was narrowed, so the assistant doesn't characterise the whole lap from one corner of it. `-hz N` trades resolution for size (60Hz default; a long complex across five laps runs to a few thousand rows). ABS and lock-ups survive downsampling — they're reported if they occurred anywhere in the window a row covers, not sampled at one instant.
 
 `analyze -trace T3,T4` prints the same traces without the brief around them.
+
+### `-map` — showing the corner
+
+`coach -map -highlight "T6:Turn in later"` also writes an SVG of the lap's outline next to the `.ibt`, with T6 painted on it and the caption beside it; the path is printed to stderr. Every corner is labelled, the start/finish line and direction of travel are marked, and the file opens in any browser (light or dark). With `-segment` and no `-highlight`, the focused corners are the ones highlighted. The brief itself is unchanged, so the map costs nothing to produce — only showing it inline in a chat reads the ~15 KB file.
 
 ---
 

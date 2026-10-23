@@ -17,6 +17,8 @@ Parses the `-config` flag, loads the config file, and dispatches to one of thirt
 | `analyze_notes.go` | Voice notes in analyze: `notesFileForIbt`, `loadNotesForIbt`, `locateSessionNotes`, `printNotes` |
 | `analyze_json.go` | The `-json` wire format: `analyzeResult` and its `json*` types, `writeAnalyzeJSON` |
 | `analyze_trace.go` | `-trace`/`-hz`: `buildSegmentTraces`, `printTraces`, and the large-trace stderr note |
+| `analyze_map.go` | `-map`/`-highlight`: `parseHighlights`, `trackMapPath`, `writeTrackMap`, `runTrackMap` |
+| `analyze_map_test.go` | Tests for highlight parsing, map path, rendering to file, and the `-highlight` refusals |
 | `analyze_json_build.go` | `buildAnalyzeResult` — maps computed values into the JSON document |
 | `analyze_pb.go` | Stored-PB rendering for `-lap pb` (`runStoredPB*`, `printStoredPB`, `emitStoredPB`) and `phasesToPB` |
 | `analyze_helpers.go` | Lap selection/filtering (`bestAnalyzeLap`, `flyingLapsWithinTime`, `crossLapComparableLaps`), `formatMapLine`, path and formatting helpers |
@@ -110,7 +112,19 @@ Two mechanisms make that possible:
 
 Stdout is wrapped by `captureStdout` in `main.go` so the full analyze output is teed into a buffer while still streaming to the terminal; after `RunAnalyze` returns, the buffer is piped into `clip.exe` (Windows) / `pbcopy` (macOS) so the user can paste it straight into Claude. `analyzeDie` calls `os.Exit(1)` which skips the deferred clipboard write — partial broken output is intentionally not copied.
 
-Flags: `-lap N|pb`, `-update-map`, `-geo-method latlon|lataccel`, `-dump <seg>`, `-dump-all`, `-trace <segs>`, `-hz N`, `-json`, `-note-lag <seconds>`
+Flags: `-lap N|pb`, `-update-map`, `-geo-method latlon|lataccel`, `-dump <seg>`, `-dump-all`, `-trace <segs>`, `-hz N`, `-json`, `-note-lag <seconds>`, `-map`, `-highlight <segs>`
+
+### `-map` and `-highlight` (`analyze_map.go`)
+
+`-map` writes `<ibt name>_map.svg` next to the `.ibt` — the analysed lap's GPS outline, every corner labelled (rendering: `trackmap.RenderSVG`). `-highlight "T6:Turn in later,T3"` paints those segments on it, each with an optional caption after a colon. It exists because the debrief has to describe corners by landmark, and a picture with the corner on it needs no description.
+
+- **The path goes to stderr, not the table sink**, so it survives `-json` — that is how `coach -map` reports where the file is without touching the brief. Running it costs one line of output; the brief stays the same size.
+- **An unknown `-highlight` name fails the whole spec**, as `ResolveSegmentList` does for traces: a map missing the corner the debrief is about would send the driver to the wrong part of the track. A repeated name keeps its first non-empty caption.
+- `-highlight` without `-map` is refused rather than ignored, and needs a track map to resolve names against. `-map` alone draws without one.
+- A failed render removes the file rather than leaving an empty SVG, which would open as a blank page and look like a rendering bug.
+- Captions cannot contain a comma; it separates entries.
+
+`coach -map` passes both flags through, and with `-segment` and no `-highlight` it highlights the focused corners.
 
 ### `-trace` and `-hz` (`analyze_trace.go`)
 
