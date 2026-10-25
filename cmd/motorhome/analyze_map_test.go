@@ -97,7 +97,7 @@ func TestWriteTrackMap(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s_map.svg")
 	hl := []trackmap.Highlight{{Segment: 3, Caption: "Turn in later"}}
 	lap := mapTestLap(12)
-	if err := writeTrackMap(path, &lap, mapTestSegs(), hl, "Test Ring"); err != nil {
+	if err := writeTrackMap(path, &lap, mapTestSegs(), sessionMapOptions(&lap, "Test Ring", hl)); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(path)
@@ -118,7 +118,7 @@ func TestWriteTrackMap_NoGPSLeavesNoFile(t *testing.T) {
 	for i := range lap.Samples {
 		lap.Samples[i].Lat, lap.Samples[i].Lon = 0, 0
 	}
-	if err := writeTrackMap(path, &lap, mapTestSegs(), nil, "Test Ring"); err == nil {
+	if err := writeTrackMap(path, &lap, mapTestSegs(), sessionMapOptions(&lap, "Test Ring", nil)); err == nil {
 		t.Fatal("expected an error for a lap with no GPS")
 	}
 	// A half-written or empty SVG would open as a blank page and look like a
@@ -147,5 +147,81 @@ func TestHighlightRefusals(t *testing.T) {
 				t.Errorf("stderr %q does not contain %q", stderr, c.want)
 			}
 		})
+	}
+}
+
+func TestReferenceMapPath(t *testing.T) {
+	dir := filepath.Join("C:", "maps")
+	cases := map[string]string{
+		"Kurzanbindung w/out Arena": "Kurzanbindung w_out Arena.svg",
+		`Road "America": GP?`:       "Road _America__ GP_.svg",
+		"  ":                        "unknown track.svg",
+	}
+	for track, want := range cases {
+		if got := referenceMapPath(dir, track); got != filepath.Join(dir, want) {
+			t.Errorf("referenceMapPath(%q) = %q, want %q", track, got, filepath.Join(dir, want))
+		}
+	}
+}
+
+func TestSegmentSignature_ChangesWithNamesAndBounds(t *testing.T) {
+	base := segmentSignature(mapTestSegs())
+	renamed := mapTestSegs()
+	renamed[1].Name = "T1 Hairpin"
+	moved := mapTestSegs()
+	moved[1].ExitPct = 0.31
+	if segmentSignature(renamed) == base || segmentSignature(moved) == base {
+		t.Error("a renamed or re-detected corner must change the signature")
+	}
+	if segmentSignature(mapTestSegs()) != base {
+		t.Error("signature must be deterministic")
+	}
+}
+
+func TestRefreshReferenceMap(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "maps") // does not exist yet
+	lap := mapTestLap(5)
+
+	path, written, err := refreshReferenceMap(dir, &lap, mapTestSegs(), "Test Ring")
+	if err != nil || !written {
+		t.Fatalf("first run: written=%v err=%v", written, err)
+	}
+	b, _ := os.ReadFile(path)
+	if strings.Contains(string(b), `class="hl"`) {
+		t.Error("the reference map must carry no session highlights")
+	}
+	if !strings.Contains(string(b), "Reference map") {
+		t.Error("reference map should say what it is")
+	}
+
+	// Same segments, different lap: left alone, so the copy stays stable.
+	other := mapTestLap(9)
+	if _, written, err := refreshReferenceMap(dir, &other, mapTestSegs(), "Test Ring"); err != nil || written {
+		t.Errorf("unchanged segments should not redraw: written=%v err=%v", written, err)
+	}
+
+	// Renamed corner: redrawn, so its labels match what analyze prints.
+	segs := mapTestSegs()
+	segs[3].Name = "T2 Kink"
+	if _, written, err := refreshReferenceMap(dir, &other, segs, "Test Ring"); err != nil || !written {
+		t.Errorf("changed segments should redraw: written=%v err=%v", written, err)
+	}
+	b, _ = os.ReadFile(path)
+	if !strings.Contains(string(b), ">T2 Kink</text>") {
+		t.Error("redrawn reference map does not carry the new name")
+	}
+}
+
+func TestRefreshReferenceMap_SkipsWithoutSegmentsOrDir(t *testing.T) {
+	lap := mapTestLap(5)
+	dir := t.TempDir()
+	if path, written, err := refreshReferenceMap(dir, &lap, nil, "Test Ring"); path != "" || written || err != nil {
+		t.Errorf("no segments: got %q %v %v", path, written, err)
+	}
+	if path, written, err := refreshReferenceMap("", &lap, mapTestSegs(), "Test Ring"); path != "" || written || err != nil {
+		t.Errorf("no maps dir: got %q %v %v", path, written, err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("nothing should have been written, found %d entries", len(entries))
 	}
 }

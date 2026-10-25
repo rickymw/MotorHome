@@ -17,7 +17,7 @@ Parses the `-config` flag, loads the config file, and dispatches to one of thirt
 | `analyze_notes.go` | Voice notes in analyze: `notesFileForIbt`, `loadNotesForIbt`, `locateSessionNotes`, `printNotes` |
 | `analyze_json.go` | The `-json` wire format: `analyzeResult` and its `json*` types, `writeAnalyzeJSON` |
 | `analyze_trace.go` | `-trace`/`-hz`: `buildSegmentTraces`, `printTraces`, and the large-trace stderr note |
-| `analyze_map.go` | `-map`/`-highlight`: `parseHighlights`, `trackMapPath`, `writeTrackMap`, `runTrackMap` |
+| `analyze_map.go` | `-map`/`-highlight`: `parseHighlights`, `trackMapPath`, `writeTrackMap`, `runTrackMap`; the per-track reference copy (`refreshReferenceMap`, `referenceMapPath`, `segmentSignature`) |
 | `analyze_map_test.go` | Tests for highlight parsing, map path, rendering to file, and the `-highlight` refusals |
 | `analyze_json_build.go` | `buildAnalyzeResult` — maps computed values into the JSON document |
 | `analyze_pb.go` | Stored-PB rendering for `-lap pb` (`runStoredPB*`, `printStoredPB`, `emitStoredPB`) and `phasesToPB` |
@@ -81,6 +81,7 @@ Runtime file paths are all derived from the config file's directory:
 - `trackmap.json` — segment geometry store
 - `pb.json` — personal best store
 - `pbscan.json` — sessions already checked for PBs by the catch-up (`pb_catchup.go`)
+- `maps/` — per-track reference maps written by `-map` (`analyze_map.go`)
 - `notes/` — voice notes directory
 
 `analyze.go` was ~1150 lines and its package sat at ~10% coverage; the rendering and helper code is now split out so it can be tested directly. `formatMapLine` is the first result of that — the map-summary line used to be inline in `RunAnalyze` and therefore untestable.
@@ -125,6 +126,8 @@ Flags: `-lap N|pb`, `-update-map`, `-geo-method latlon|lataccel`, `-dump <seg>`,
 - Captions cannot contain a comma; it separates entries.
 
 `coach -map` passes both flags through, and with `-segment` and no `-highlight` it highlights the focused corners.
+
+**Reference copy.** `refreshReferenceMap` also keeps `maps/<track>.svg` beside `trackmap.json`: no highlights, every corner labelled, subtitled as a reference. It is redrawn only when `segmentSignature` (segment names and boundaries, stored in the SVG's `<desc>`) no longer matches — so a re-detection or `cornerNames` edit refreshes it and an ordinary session does not. stderr says `Reference map updated →` when it was redrawn and `Reference map →` when it was current. A write failure is a warning, not a failed run. `referenceMapPath` replaces the characters Windows forbids in file names (`Kurzanbindung w/out Arena` → `Kurzanbindung w_out Arena.svg`).
 
 ### `-trace` and `-hz` (`analyze_trace.go`)
 

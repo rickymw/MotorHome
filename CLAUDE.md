@@ -151,7 +151,7 @@ When a finding needs the samples rather than the aggregates — pedal timing, wh
 
 The focused brief carries a `Focus:` line: everything outside those corners has been removed, so do not characterise the lap as a whole or rank the focused corners against the rest from it. Reach for this *after* the full brief has identified the corner, not instead of it.
 
-Once the debrief's corners are chosen, draw them: `analyze -map -highlight "T6:Turn in later,T3:Also coasting"` (captions are the short instruction, in the debrief's words) writes an SVG next to the `.ibt` and prints its path on stderr. Producing it costs one stderr line; showing it inline means reading the ~15 KB file, so do that once per debrief, not per draft.
+Draw the map **before asking the driver questions**, with the corners the questions name highlighted, so they can see which corner is meant; then redraw it with the debrief's fixes once those are chosen: `analyze -map -highlight "T6:Turn in later,T3:Also coasting"` (captions are the short instruction, in the debrief's words) writes an SVG next to the `.ibt` and prints its path on stderr. Send it with `SendUserFile` (`display: "render"`) rather than reading the ~15 KB file into the conversation. The same run keeps `maps/<track>.svg` — the per-track reference copy, every corner labelled — up to date.
 
 `analyze` remains the human-facing view (formatted tables, auto-copied to the clipboard); `coach` is the machine-facing one. There is no API key and no network call — the assistant reading the brief *is* the coach.
 
@@ -281,7 +281,9 @@ Traces cover **every comparable lap**, not just the analysed one — comparing l
 ### Track map drawing (`-map`, `-highlight`)
 `-map` writes `<ibt name>_map.svg` next to the `.ibt`: the analysed lap's GPS outline with every corner labelled, start/finish and direction of travel marked. `-highlight "T6:caption,T3"` paints segments and captions them (`cmd/motorhome/analyze_map.go`; drawing in `trackmap.RenderSVG`). It exists because the debrief describes corners by landmark only for want of a picture.
 
-The path goes to **stderr**, like warnings, so it survives `-json` and `coach -map` can report it without changing the brief. Highlight names resolve like `-trace`'s — an unknown one fails the whole spec, since a map missing the corner the debrief is about points the driver at the wrong place. `coach -map -segment T3` highlights the focused corners by default.
+The path goes to **stderr**, like warnings, so it survives `-json` and `coach -map` can report it without changing the brief.
+
+Every `-map` run also maintains a **reference copy** per track, `maps/<track>.svg` next to `trackmap.json` (track name with Windows-illegal characters replaced): no highlights, every corner labelled. Session maps carry that session's highlights and live among the telemetry, so they are the wrong thing to keep as the key to a track's T-labels. The reference is redrawn **only when the segment list changes** — a signature of names and boundaries is stored in its `<desc>` and compared — so a `cornerNames` edit or a re-detection refreshes it, and an ordinary session leaves it alone; a copy that shifted every run would not be a reference. A failure to write it is a warning, never a failed run. No track map means no labels to key, so no reference is written. Highlight names resolve like `-trace`'s — an unknown one fails the whole spec, since a map missing the corner the debrief is about points the driver at the wrong place. `coach -map -segment T3` highlights the focused corners by default.
 
 Two rendering choices that were wrong first time: the 60Hz outline is thinned to one point per 2px (~150 KB → ~15 KB, which is what an assistant pays to show it), and labels are placed by searching candidate spots for clearance from the track and each other, not by pushing them "outward" — tracks aren't convex, and on the real Kurzanbindung map that rule put both highlighted captions on the track.
 
@@ -698,6 +700,7 @@ All live next to the binary in `G:\RACING\SimAppLauncher\`:
 | `trackref.json` | hand-edited | expected corner counts per track (guides detection) + `cornerNames` corner labels |
 | `pb.json` | auto on first `analyze` | personal best per car/track |
 | `pbscan.json` | auto on first `analyze` | sessions already checked for PBs by the catch-up (delete it to force a full re-check) |
+| `maps/<track>.svg` | auto on `analyze -map` | per-track reference map, every corner labelled; redrawn when the corners change |
 
 ## Deployment
 - Binary + config live in `G:\RACING\SimAppLauncher\` (the repo root)

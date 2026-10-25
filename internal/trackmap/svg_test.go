@@ -103,6 +103,17 @@ func TestRenderSVG_HighlightWithCaption(t *testing.T) {
 	}
 }
 
+func TestRenderSVG_Description(t *testing.T) {
+	svg := render(t, ovalLap(400), ovalSegs(), MapOptions{Description: "segments: T1 & T2"})
+	assertWellFormed(t, svg)
+	if !strings.Contains(svg, "<desc>segments: T1 &amp; T2</desc>") {
+		t.Error("description missing or not escaped")
+	}
+	if strings.Contains(render(t, ovalLap(400), ovalSegs(), MapOptions{}), "<desc>") {
+		t.Error("an empty description should emit no <desc>")
+	}
+}
+
 func TestRenderSVG_HighlightedStraightIsLabelled(t *testing.T) {
 	svg := render(t, ovalLap(400), ovalSegs(), MapOptions{Highlights: []Highlight{{Segment: 2}}})
 	if !strings.Contains(svg, ">S2</text>") {

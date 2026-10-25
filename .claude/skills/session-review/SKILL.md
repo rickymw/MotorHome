@@ -165,6 +165,22 @@ change you don't know the reason for, that can be the second question.
 
 Ask **before** writing the debrief, so the answer shapes it.
 
+**Show the map before you ask.** The driver needs to see which corner a
+question means — a landmark description alone makes them guess. Draw the
+session's map with the corners your questions name highlighted, captioned as
+the question names them, and send it in the same message as the questions:
+
+```powershell
+.\motorhome.exe analyze -map -highlight "T3:Long middle section,T6:Last corner" <ibt or index>
+```
+
+Send the file it reports on stderr (`Track map → …`) with `SendUserFile`
+(`display: "render"`) — that shows it without reading the file into the
+conversation. The same run keeps the track's **reference map** up to date
+(`Reference map → …`, in `maps/` next to the binary): every corner labelled,
+no highlights. Point the driver at it once, the first time a track comes up,
+as the copy to keep; it is redrawn only when the track's corners change.
+
 ## 6. Choose what to coach — easy wins first
 
 Rank candidates by **easy to do × how many corners it applies to × time it
@@ -322,11 +338,11 @@ decoding a landmark description:
 
 One entry per coaching item (and the *Also found* corner if it has one), the
 caption being the item's short instruction in the debrief's own words — a few
-words, no commas. The SVG lands next to the `.ibt` and its path is printed on
-stderr. Show it to the driver once with the debrief (read the file and render
-it inline, or give them the path to open); it is ~15 KB, so don't re-read it
-for every draft. The landmark descriptions in the text stay — the map
-supports them, it doesn't replace them.
+words, no commas. This redraws the session map from step 5 with the fixes in
+place of the questions. Send it with `SendUserFile` (`display: "render"`) —
+never by reading the ~15 KB file into the conversation. The landmark
+descriptions in the text stay — the map supports them, it doesn't replace
+them.
 
 Pass the same `.ibt` (or index) the debrief was built from: if the driver has
 recorded since, "most recent" is a different session.

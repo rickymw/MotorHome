@@ -29,9 +29,13 @@ type Highlight struct {
 
 // MapOptions controls RenderSVG.
 type MapOptions struct {
-	Title      string // first header line, e.g. the track name; "" for none
-	Subtitle   string // second header line, e.g. the lap; "" for none
-	Highlights []Highlight
+	Title    string // first header line, e.g. the track name; "" for none
+	Subtitle string // second header line, e.g. the lap; "" for none
+	// Description goes in the SVG's <desc> element: not drawn, but read by
+	// screen readers and by callers that need to know what a file was drawn
+	// from (the reference map keys its staleness check on it).
+	Description string
+	Highlights  []Highlight
 }
 
 // ErrNoGPS is returned when the samples carry too few Lat/Lon fixes to draw.
@@ -93,6 +97,9 @@ func RenderSVG(w io.Writer, samples []Sample, segs []Segment, opt MapOptions) er
 	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" width="100%%" viewBox="0 0 %.0f %.0f" role="img">`+"\n",
 		svgWidth, height)
 	fmt.Fprintf(&b, "<title>%s</title>\n", esc(fallbackTitle(opt.Title)))
+	if opt.Description != "" {
+		fmt.Fprintf(&b, "<desc>%s</desc>\n", esc(opt.Description))
+	}
 	b.WriteString(svgStyle)
 	fmt.Fprintf(&b, `<rect class="bg" width="%.0f" height="%.0f"/>`+"\n", svgWidth, height)
 

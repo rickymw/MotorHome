@@ -545,7 +545,13 @@ func RunAnalyze(args []string, cfg config.Config, trackmapPath, pbPath, notesDir
 	}
 
 	if *mapOut {
-		runTrackMap(ibtPath, laps, lapNum, segs, *highlight, meta.TrackDisplayName)
+		// The reference copy lives with the other per-track stores, next to
+		// trackmap.json, where it is found without knowing a session's name.
+		mapsDir := ""
+		if trackmapPath != "" {
+			mapsDir = filepath.Join(filepath.Dir(trackmapPath), "maps")
+		}
+		runTrackMap(ibtPath, laps, lapNum, segs, *highlight, meta.TrackDisplayName, mapsDir)
 	}
 
 	if *jsonOut {

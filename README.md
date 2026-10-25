@@ -320,7 +320,9 @@ The brief says in its orientation that it was narrowed, so the assistant doesn't
 
 ### `-map` — showing the corner
 
-`coach -map -highlight "T6:Turn in later"` also writes an SVG of the lap's outline next to the `.ibt`, with T6 painted on it and the caption beside it; the path is printed to stderr. Every corner is labelled, the start/finish line and direction of travel are marked, and the file opens in any browser (light or dark). With `-segment` and no `-highlight`, the focused corners are the ones highlighted. The brief itself is unchanged, so the map costs nothing to produce — only showing it inline in a chat reads the ~15 KB file.
+`coach -map -highlight "T6:Turn in later"` also writes an SVG of the lap's outline next to the `.ibt`, with T6 painted on it and the caption beside it; the path is printed to stderr. Every corner is labelled, the start/finish line and direction of travel are marked, and the file opens in any browser (light or dark). With `-segment` and no `-highlight`, the focused corners are the ones highlighted.
+
+Each `-map` run also keeps a reference copy per track in `maps/` next to the binary (e.g. `maps\Kurzanbindung w_out Arena.svg`): every corner labelled, nothing highlighted — the one to keep as a key to the corner names. It is only redrawn when the track's corners change (a re-detection, or new `cornerNames`), so it stays put from session to session. The brief itself is unchanged, so the map costs nothing to produce — only showing it inline in a chat reads the ~15 KB file.
 
 ---
 
